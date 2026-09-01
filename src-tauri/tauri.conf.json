@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpenPeek",
+  "version": "1.0.0",
+  "identifier": "com.openpeek.app",
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "OpenPeek - Screen Recorder & Studio",
+        "width": 1150,
+        "height": 780,
+        "resizable": true,
+        "fullscreen": false,
+        "theme": "Dark"
+      },
+      {
+        "label": "overlay",
+        "title": "OpenPeek Overlay",
+        "url": "index.html#overlay",
+        "transparent": true,
+        "fullscreen": true,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "visible": false,
+        "skipTaskbar": true,
+        "shadow": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  }
+}

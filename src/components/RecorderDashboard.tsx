@@ -1,0 +1,770 @@
+import React, { useEffect, useRef } from 'react';
+import type { RecorderOptions } from '../hooks/useRecorder';
+import { 
+  Play, 
+  Pause, 
+  Square, 
+  Video, 
+  Mic, 
+  Volume2, 
+  ZoomIn, 
+  ZoomOut, 
+  Target, 
+  MousePointer,
+  Pencil,
+  ArrowUpRight,
+  Highlighter,
+  ShieldAlert,
+  Trash2,
+  Sparkles,
+  Eye,
+  EyeOff
+} from 'lucide-react';
+
+interface RecorderDashboardProps {
+  options: RecorderOptions;
+  setOptions: React.Dispatch<React.SetStateAction<RecorderOptions>>;
+  recorder: any; // Return type of useRecorder
+}
+
+export function RecorderDashboard({ options, setOptions, recorder }: RecorderDashboardProps) {
+  const {
+    isRecording,
+    isPaused,
+    isPreviewing,
+    recordingTime,
+    micLevel,
+    countdown,
+    cancelCountdown,
+    startScreenPreview,
+    stopScreenPreview,
+    isZoomed,
+    isSpotlight,
+    zoomFactor,
+    toggleZoom,
+    setZoomCenter,
+    setZoomFactor,
+    toggleSpotlight,
+    // Live Drawing API
+    isDrawingMode,
+    drawTool,
+    drawColor,
+    isAutoFade,
+    toggleDrawingMode,
+    setDrawTool,
+    setDrawColor,
+    setIsAutoFade,
+    clearDrawings,
+    startDrawingStroke,
+    updateDrawingStroke,
+    endDrawingStroke,
+    canvas: recorderCanvas,
+    analyserNode,
+    startRecording,
+    pauseRecording,
+    resumeRecording,
+    stopRecording,
+    updateWebcamPosition,
+    setWebcamSize
+  } = recorder;
+
+  const canvasMountRef = useRef<HTMLDivElement>(null);
+  const visualizerCanvasRef = useRef<HTMLCanvasElement>(null);
+  const isDraggingRef = useRef(false);
+  const isDrawingStrokeActiveRef = useRef(false);
+
+  // 1. Render the live composite canvas inside a dedicated mounting wrapper
+  useEffect(() => {
+    const mount = canvasMountRef.current;
+    if (mount && recorderCanvas) {
+      if (!mount.contains(recorderCanvas)) {
+        mount.innerHTML = '';
+        recorderCanvas.style.width = '100%';
+        recorderCanvas.style.height = '100%';
+        recorderCanvas.style.objectFit = 'contain';
+        recorderCanvas.className = 'preview-video';
+        mount.appendChild(recorderCanvas);
+      }
+    }
+  }, [recorderCanvas]);
+
+  // 2. Audio Visualizer for Mic Activity
+  useEffect(() => {
+    if (!visualizerCanvasRef.current || !analyserNode || !isRecording || isPaused) return;
+
+    const canvas = visualizerCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animationId: number;
+    const bufferLength = analyserNode.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    const render = () => {
+      animationId = requestAnimationFrame(render);
+      analyserNode.getByteFrequencyData(dataArray);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Render glowing audio bars
+      const barWidth = (canvas.width / 32) - 2;
+      let x = 0;
+
+      for (let i = 0; i < 32; i++) {
+        const barHeight = (dataArray[i * 2] / 255) * canvas.height;
+        
+        // Gradient color for audio activity
+        const gradient = ctx.createLinearGradient(0, canvas.height, 0, 0);
+        gradient.addColorStop(0, '#8b5cf6');
+        gradient.addColorStop(1, '#ec4899');
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+
+        x += barWidth + 2;
+      }
+    };
+
+    render();
+
+    return () => {
+      cancelAnimationFrame(animationId);
+    };
+  }, [analyserNode, isRecording, isPaused]);
+
+  // 3. Mouse interactions on canvas (Drawing vs Webcam dragging)
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isRecording) return;
+    if (!canvasMountRef.current || !recorderCanvas) return;
+    const canvasElement = canvasMountRef.current.querySelector('canvas');
+    if (!canvasElement) return;
+
+    const rect = canvasElement.getBoundingClientRect();
+    const clickX = (e.clientX - rect.left) / rect.width;
+    const clickY = (e.clientY - rect.top) / rect.height;
+
+    if (isDrawingMode) {
+      isDrawingStrokeActiveRef.current = true;
+      startDrawingStroke(clickX, clickY);
+      return;
+    }
+
+    if (options.showWebcam) {
+      isDraggingRef.current = true;
+      handleDrag(e);
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isRecording) return;
+    if (!canvasMountRef.current || !recorderCanvas) return;
+    const canvasElement = canvasMountRef.current.querySelector('canvas');
+    if (!canvasElement) return;
+
+    const rect = canvasElement.getBoundingClientRect();
+    const clickX = (e.clientX - rect.left) / rect.width;
+    const clickY = (e.clientY - rect.top) / rect.height;
+
+    if (isDrawingMode && isDrawingStrokeActiveRef.current) {
+      updateDrawingStroke(clickX, clickY);
+      return;
+    }
+
+    if (isDraggingRef.current) {
+      handleDrag(e);
+    }
+  };
+
+  const handleMouseUpOrLeave = () => {
+    if (isDrawingMode && isDrawingStrokeActiveRef.current) {
+      isDrawingStrokeActiveRef.current = false;
+      endDrawingStroke();
+    }
+    isDraggingRef.current = false;
+  };
+
+  const handleDrag = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!canvasMountRef.current || !recorderCanvas) return;
+    const canvasElement = canvasMountRef.current.querySelector('canvas');
+    if (!canvasElement) return;
+
+    const rect = canvasElement.getBoundingClientRect();
+    updateWebcamPosition(e.clientX, e.clientY, rect);
+  };
+
+  // 4. Double-click on preview to center zoom dynamically
+  const handlePreviewClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isRecording || isDrawingMode) return;
+    if (!canvasMountRef.current) return;
+    const canvasElement = canvasMountRef.current.querySelector('canvas');
+    if (!canvasElement) return;
+
+    const rect = canvasElement.getBoundingClientRect();
+    const clickX = (e.clientX - rect.left) / rect.width;
+    const clickY = (e.clientY - rect.top) / rect.height;
+
+    setZoomCenter(clickX, clickY);
+  };
+
+  // Format Elapsed Time (HH:MM:SS)
+  const formatTime = (totalSeconds: number) => {
+    const hrs = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+    return [
+      hrs > 0 ? String(hrs).padStart(2, '0') : null,
+      String(mins).padStart(2, '0'),
+      String(secs).padStart(2, '0')
+    ].filter(Boolean).join(':');
+  };
+
+  return (
+    <div className="dashboard-grid">
+      {/* Left side: Live Preview & Live Drawing/Webcam */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div 
+          className="preview-container" 
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUpOrLeave}
+          onMouseLeave={handleMouseUpOrLeave}
+          onDoubleClick={handlePreviewClick}
+          title={isRecording ? (isDrawingMode ? "Dessinez directement sur la vidéo avec la souris !" : "Double-cliquez sur une zone pour y centrer le Zoom direct !") : ""}
+          style={{ cursor: isRecording ? (isDrawingMode ? 'crosshair' : (options.showWebcam ? 'move' : 'pointer')) : 'default' }}
+        >
+          {/* Canvas dedicated mount container */}
+          <div 
+            ref={canvasMountRef} 
+            style={{ 
+              width: '100%', 
+              height: '100%', 
+              display: (isRecording || isPreviewing || countdown !== null) ? 'block' : 'none' 
+            }} 
+          />
+
+          {isPreviewing && !isRecording && (
+            <div style={{
+              position: 'absolute',
+              top: '12px',
+              left: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '20px',
+              backgroundColor: 'rgba(15, 23, 42, 0.9)',
+              border: '1px solid #06b6d4',
+              boxShadow: '0 0 12px rgba(6, 182, 212, 0.4)',
+              zIndex: 10,
+              fontSize: '12px',
+              color: '#38bdf8',
+              fontWeight: 600,
+              pointerEvents: 'none'
+            }}>
+              <Eye size={14} />
+              <span>Aperçu de Cadrage Actif • Déplacez et dimensionnez vos flous</span>
+            </div>
+          )}
+
+          {isRecording && isDrawingMode && (
+            <div style={{
+              position: 'absolute',
+              top: '12px',
+              left: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '20px',
+              backgroundColor: 'rgba(15, 23, 42, 0.85)',
+              border: `1px solid ${drawColor}`,
+              boxShadow: `0 0 12px ${drawColor}40`,
+              zIndex: 10,
+              fontSize: '12px',
+              color: '#ffffff',
+              fontWeight: 500,
+              pointerEvents: 'none'
+            }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: drawColor, boxShadow: `0 0 6px ${drawColor}` }} />
+              <span>Feutre Actif (dessinez n'importe où à l'écran)</span>
+            </div>
+          )}
+
+          {/* Interactive Draggable & Resizable Privacy Blur Masks on Live Preview */}
+          {recorder.blurMasks && recorder.blurMasks.map((mask: any) => (
+            <div
+              key={mask.id}
+              style={{
+                position: 'absolute',
+                left: `${mask.x * 100}%`,
+                top: `${mask.y * 100}%`,
+                width: `${mask.width * 100}%`,
+                height: `${mask.height * 100}%`,
+                border: '2px dashed #c084fc',
+                backgroundColor: 'rgba(139, 92, 246, 0.22)',
+                borderRadius: '4px',
+                cursor: 'move',
+                zIndex: 25,
+                boxShadow: '0 0 12px rgba(139, 92, 246, 0.45)'
+              }}
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                const startClientX = e.clientX;
+                const startClientY = e.clientY;
+                const startMaskX = mask.x;
+                const startMaskY = mask.y;
+                const containerRect = canvasMountRef.current?.getBoundingClientRect();
+                if (!containerRect) return;
+
+                const handleMove = (moveEvent: MouseEvent) => {
+                  const dx = (moveEvent.clientX - startClientX) / containerRect.width;
+                  const dy = (moveEvent.clientY - startClientY) / containerRect.height;
+                  const newX = Math.max(0, Math.min(1 - mask.width, startMaskX + dx));
+                  const newY = Math.max(0, Math.min(1 - mask.height, startMaskY + dy));
+                  recorder.updateBlurMask(mask.id, { x: newX, y: newY });
+                };
+
+                const handleUp = () => {
+                  window.removeEventListener('mousemove', handleMove);
+                  window.removeEventListener('mouseup', handleUp);
+                };
+
+                window.addEventListener('mousemove', handleMove);
+                window.addEventListener('mouseup', handleUp);
+              }}
+            >
+              {/* Delete button badge */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  recorder.removeBlurMask(mask.id);
+                }}
+                style={{
+                  position: 'absolute',
+                  top: '-8px',
+                  right: '-8px',
+                  width: '18px',
+                  height: '18px',
+                  borderRadius: '50%',
+                  backgroundColor: '#f43f5e',
+                  color: '#ffffff',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '10px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.5)'
+                }}
+                title="Supprimer cette zone de flou"
+              >
+                ✕
+              </button>
+
+              {/* Resize handle */}
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: '-4px',
+                  right: '-4px',
+                  width: '12px',
+                  height: '12px',
+                  backgroundColor: '#06b6d4',
+                  borderRadius: '2px',
+                  cursor: 'nwse-resize',
+                  boxShadow: '0 0 6px rgba(6, 182, 212, 0.8)'
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  const startClientX = e.clientX;
+                  const startClientY = e.clientY;
+                  const startMaskW = mask.width;
+                  const startMaskH = mask.height;
+                  const containerRect = canvasMountRef.current?.getBoundingClientRect();
+                  if (!containerRect) return;
+
+                  const handleResize = (moveEvent: MouseEvent) => {
+                    const dx = (moveEvent.clientX - startClientX) / containerRect.width;
+                    const dy = (moveEvent.clientY - startClientY) / containerRect.height;
+                    const newW = Math.max(0.05, Math.min(1 - mask.x, startMaskW + dx));
+                    const newH = Math.max(0.05, Math.min(1 - mask.y, startMaskH + dy));
+                    recorder.updateBlurMask(mask.id, { width: newW, height: newH });
+                  };
+
+                  const handleUp = () => {
+                    window.removeEventListener('mousemove', handleResize);
+                    window.removeEventListener('mouseup', handleUp);
+                  };
+
+                  window.addEventListener('mousemove', handleResize);
+                  window.addEventListener('mouseup', handleUp);
+                }}
+              />
+            </div>
+          ))}
+
+          {!isRecording && !isPreviewing && countdown === null && (
+            <div className="no-preview-placeholder">
+              <Video size={48} />
+              <span>Aucun enregistrement en cours. Cliquez sur Aperçu pour cadrer ou sur REC.</span>
+            </div>
+          )}
+
+          {countdown !== null && (
+            <div className="countdown-overlay">
+              <div className="countdown-content">
+                <div className="countdown-number-circle">
+                  <span key={countdown} className="countdown-number">{countdown}</span>
+                </div>
+                <p className="countdown-title">Démarrage dans {countdown}s...</p>
+                <p className="countdown-subtitle">La capture se lance sur votre écran complet</p>
+                <button className="btn-secondary" onClick={cancelCountdown} style={{ marginTop: '12px', fontSize: '13px', padding: '6px 16px' }}>
+                  Annuler
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Live Toolbars during active recording: Zoom & Drawing Toolbars */}
+        {isRecording && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {/* Zoom Controls */}
+            <div className="glass-panel zoom-toolbar">
+              <button 
+                className={`btn-toolbar ${isZoomed ? 'active' : ''}`}
+                onClick={() => toggleZoom()}
+                title="Activer/Désactiver le Zoom dynamique (Alt + Z ou F9)"
+              >
+                {isZoomed ? <ZoomOut size={16} /> : <ZoomIn size={16} />}
+                <span>{isZoomed ? 'Dézoomer' : 'Zoomer'}</span>
+                <span className="shortcut-badge">Alt + Z / F9</span>
+              </button>
+
+              <div className="zoom-factor-group">
+                {[1.5, 2.0, 2.5].map((factor) => (
+                  <button
+                    key={factor}
+                    className={`btn-factor ${zoomFactor === factor ? 'selected' : ''}`}
+                    onClick={() => setZoomFactor(factor)}
+                    title={`Niveau de zoom ${factor}x`}
+                  >
+                    {factor}x
+                  </button>
+                ))}
+              </div>
+
+              <button 
+                className={`btn-toolbar ${isSpotlight ? 'active' : ''}`}
+                onClick={toggleSpotlight}
+                title="Activer l'effet Projecteur (Spotlight) sur la zone ciblée"
+              >
+                <Target size={16} />
+                <span>Projecteur</span>
+              </button>
+
+              {/* Webcam Size slider if webcam is active */}
+              {options.showWebcam && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', borderLeft: '1px solid var(--border-color)', paddingLeft: '12px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Taille Cam :</span>
+                  <input 
+                    type="range" 
+                    min="0.04" 
+                    max="0.15" 
+                    step="0.01" 
+                    defaultValue="0.08"
+                    className="thickness-slider"
+                    onChange={(e) => setWebcamSize(parseFloat(e.target.value))}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Live Annotation / Drawing Toolbar */}
+            <div className="glass-panel zoom-toolbar" style={{ flexWrap: 'wrap' }}>
+              <button 
+                className={`btn-toolbar ${isDrawingMode ? 'active' : ''}`}
+                onClick={toggleDrawingMode}
+                title="Activer/Désactiver le Feutre en direct (Alt + D ou F8)"
+              >
+                <Pencil size={16} />
+                <span>{isDrawingMode ? 'Feutre Actif' : 'Feutre'}</span>
+                <span className="shortcut-badge">Alt + D / F8</span>
+              </button>
+
+              {isDrawingMode && (
+                <>
+                  <div className="zoom-factor-group">
+                    <button
+                      className={`btn-factor ${drawTool === 'pen' ? 'selected' : ''}`}
+                      onClick={() => setDrawTool('pen')}
+                      title="Feutre à main levée"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      className={`btn-factor ${drawTool === 'arrow' ? 'selected' : ''}`}
+                      onClick={() => setDrawTool('arrow')}
+                      title="Flèche directionnelle"
+                    >
+                      <ArrowUpRight size={14} />
+                    </button>
+                    <button
+                      className={`btn-factor ${drawTool === 'rect' ? 'selected' : ''}`}
+                      onClick={() => setDrawTool('rect')}
+                      title="Rectangle d'encadrement"
+                    >
+                      <Square size={14} />
+                    </button>
+                    <button
+                      className={`btn-factor ${drawTool === 'highlighter' ? 'selected' : ''}`}
+                      onClick={() => setDrawTool('highlighter')}
+                      title="Surligneur translucide"
+                    >
+                      <Highlighter size={14} />
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', borderLeft: '1px solid var(--border-color)', paddingLeft: '10px' }}>
+                    {[
+                      { hex: '#f43f5e', name: 'Rouge Néon' },
+                      { hex: '#a855f7', name: 'Violet' },
+                      { hex: '#06b6d4', name: 'Cyan' },
+                      { hex: '#eab308', name: 'Jaune Fluo' },
+                      { hex: '#10b981', name: 'Vert' }
+                    ].map((col) => (
+                      <button
+                        key={col.hex}
+                        onClick={() => setDrawColor(col.hex)}
+                        title={col.name}
+                        style={{
+                          width: '20px',
+                          height: '20px',
+                          borderRadius: '50%',
+                          backgroundColor: col.hex,
+                          border: drawColor === col.hex ? '2px solid #ffffff' : '2px solid transparent',
+                          transform: drawColor === col.hex ? 'scale(1.2)' : 'scale(1.0)',
+                          transition: 'all 0.15s ease',
+                          cursor: 'pointer',
+                          boxShadow: drawColor === col.hex ? `0 0 8px ${col.hex}` : 'none'
+                        }}
+                      />
+                    ))}
+                  </div>
+
+                  <button 
+                    className={`btn-toolbar ${isAutoFade ? 'active' : ''}`}
+                    onClick={() => setIsAutoFade(!isAutoFade)}
+                    title="Encre éphémère : les traits s'effacent automatiquement après 3.5 secondes"
+                  >
+                    <Sparkles size={14} />
+                    <span>Auto-fade (3s)</span>
+                  </button>
+
+                  <button 
+                    className="btn-toolbar"
+                    onClick={clearDrawings}
+                    title="Effacer tous les dessins à l'écran (Alt + C ou F10)"
+                    style={{ color: '#fb7185' }}
+                  >
+                    <Trash2 size={14} />
+                    <span>Effacer</span>
+                    <span className="shortcut-badge">Alt + C / F10</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Dedicated Privacy Blur Mask Panel */}
+        <div className="glass-panel zoom-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <ShieldAlert size={16} color="#c084fc" />
+            <span style={{ fontSize: '13px', fontWeight: 600 }}>Confidentialité (Flou Permanent)</span>
+            {recorder.blurMasks && recorder.blurMasks.length > 0 && (
+              <span className="shortcut-badge" style={{ backgroundColor: 'rgba(139, 92, 246, 0.25)', color: '#c084fc' }}>
+                {recorder.blurMasks.length} {recorder.blurMasks.length === 1 ? 'zone active' : 'zones actives'}
+              </span>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              className="btn-toolbar"
+              onClick={() => {
+                recorder.addBlurMask({
+                  id: Math.random(),
+                  x: 0.2,
+                  y: 0.35,
+                  width: 0.6,
+                  height: 0.25
+                });
+              }}
+              title="Poser un rectangle de flou permanent sur l'écran"
+              style={{ fontSize: '12px' }}
+            >
+              <ShieldAlert size={14} />
+              <span>+ Ajouter zone floue</span>
+            </button>
+
+            {recorder.blurMasks && recorder.blurMasks.length > 0 && (
+              <button
+                className="btn-toolbar"
+                onClick={recorder.clearBlurMasks}
+                title="Supprimer tous les flous de confidentialité"
+                style={{ color: '#fb7185', fontSize: '12px' }}
+              >
+                <Trash2 size={14} />
+                <span>Effacer flous</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Right side: Control Deck */}
+      <div className="glass-panel control-deck">
+        <div className="deck-glow" />
+        
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 className="deck-title">
+            Tableau de Bord
+          </h2>
+          {countdown !== null ? (
+            <span className="status-pill recording" style={{ animation: 'pulse-red 1s infinite ease-in-out' }}>
+              Décompte...
+            </span>
+          ) : isRecording ? (
+            <span className={`status-pill ${isPaused ? 'paused' : 'recording'}`}>
+              {isPaused ? 'En Pause' : 'Enregistrement'}
+            </span>
+          ) : isPreviewing ? (
+            <span className="status-pill ready" style={{ backgroundColor: 'rgba(6, 182, 212, 0.2)', color: '#38bdf8', borderColor: '#06b6d4' }}>
+              Aperçu Cadrage
+            </span>
+          ) : (
+            <span className="status-pill ready">Prêt</span>
+          )}
+        </div>
+
+        {/* Selected parameters list */}
+        <div className="sources-grid">
+          <div className={`source-card ${options.recordMic ? 'selected' : ''}`} onClick={() => !isRecording && countdown === null && setOptions(prev => ({ ...prev, recordMic: !prev.recordMic }))}>
+            <div className="source-card-icon">
+              <Mic size={20} />
+            </div>
+            <div className="source-card-title">Microphone</div>
+          </div>
+
+          <div className={`source-card ${options.recordSystemAudio ? 'selected' : ''}`} onClick={() => !isRecording && countdown === null && setOptions(prev => ({ ...prev, recordSystemAudio: !prev.recordSystemAudio }))}>
+            <div className="source-card-icon">
+              <Volume2 size={20} />
+            </div>
+            <div className="source-card-title">Son Bureau</div>
+          </div>
+
+          <div className={`source-card ${options.showWebcam ? 'selected' : ''}`} onClick={() => !isRecording && countdown === null && setOptions(prev => ({ ...prev, showWebcam: !prev.showWebcam }))}>
+            <div className="source-card-icon">
+              <Video size={20} />
+            </div>
+            <div className="source-card-title">Incrustation Cam</div>
+          </div>
+
+          <div className={`source-card ${options.showMouseClicks ? 'selected' : ''}`} onClick={() => !isRecording && countdown === null && setOptions(prev => ({ ...prev, showMouseClicks: !prev.showMouseClicks }))}>
+            <div className="source-card-icon">
+              <MousePointer size={20} />
+            </div>
+            <div className="source-card-title">Effets de Clics</div>
+          </div>
+        </div>
+
+        {/* Trigger Button section */}
+        <div className="action-section">
+          {countdown !== null ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+              <div className="countdown-badge-inline">
+                <span>{countdown}</span>
+              </div>
+              <button className="btn-secondary" onClick={cancelCountdown} style={{ fontSize: '12px' }}>
+                Annuler
+              </button>
+            </div>
+          ) : !isRecording ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+              <button className="rec-btn" onClick={startRecording} title="Démarrer l'enregistrement">
+                <div style={{ width: '26px', height: '26px', borderRadius: '50%', backgroundColor: 'white', boxShadow: '0 0 8px rgba(255,255,255,0.7)' }} />
+              </button>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent)', letterSpacing: '1.5px', textTransform: 'uppercase', textShadow: '0 0 8px var(--accent-glow)' }}>
+                Enregistrer (REC)
+              </span>
+
+              <button
+                className="btn-secondary"
+                onClick={isPreviewing ? stopScreenPreview : startScreenPreview}
+                style={{
+                  fontSize: '11px',
+                  padding: '5px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  marginTop: '4px',
+                  backgroundColor: isPreviewing ? 'rgba(6, 182, 212, 0.2)' : 'rgba(255,255,255,0.06)',
+                  borderColor: isPreviewing ? '#06b6d4' : 'var(--border-color)',
+                  color: isPreviewing ? '#38bdf8' : 'var(--text-primary)'
+                }}
+                title="Affiche l'écran en direct pour cadrer et positionner les zones de flou sans enregistrer"
+              >
+                {isPreviewing ? <EyeOff size={13} /> : <Eye size={13} />}
+                <span>{isPreviewing ? "Arrêter l'aperçu" : "Aperçu de l'écran (Cadrage)"}</span>
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+              <div className="rec-timer">
+                {formatTime(recordingTime)}
+              </div>
+
+              <div className="rec-controls-row">
+                {isPaused ? (
+                  <button className="control-icon-btn active" onClick={resumeRecording} title="Reprendre l'enregistrement">
+                    <Play size={20} fill="white" />
+                  </button>
+                ) : (
+                  <button className="control-icon-btn" onClick={pauseRecording} title="Mettre en pause l'enregistrement">
+                    <Pause size={20} />
+                  </button>
+                )}
+
+                <button className="control-icon-btn stop" onClick={stopRecording} title="Arrêter et sauvegarder l'enregistrement">
+                  <Square size={20} fill="currentColor" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Real-time audio visualizer */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 600 }}>Niveau d'Entrée Audio</span>
+          <div className="waveform-container">
+            <canvas ref={visualizerCanvasRef} width={300} height={60} className="waveform-canvas" />
+            <span className="visualizer-label">
+              {options.recordMic ? 'Microactif' : 'Micro désactivé'}
+            </span>
+          </div>
+
+          {options.recordMic && isRecording && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>
+              <div style={{ flexGrow: 1, height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
+                <div style={{ width: `${micLevel * 100}%`, height: '100%', background: 'var(--success)', transition: 'width 0.1s' }} />
+              </div>
+              <span>{Math.round(micLevel * 100)}%</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

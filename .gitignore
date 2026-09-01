@@ -1,0 +1,67 @@
+# ==========================================
+# OpenPeek - Git Ignore Rules
+# ==========================================
+
+# Rust / Tauri Build Artifacts (Largest directory ~ 1.5 GB+)
+src-tauri/target/
+target/
+src-tauri/gen/
+**/*.rs.bk
+Cargo.lock.backup
+
+# Node & Dependencies
+node_modules/
+dist/
+dist-ssr/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-debug.log*
+lerna-debug.log*
+
+# Binaries, Installers & Debug Symbols
+*.exe
+*.msi
+*.pdb
+*.dmg
+*.deb
+*.app
+*.apk
+*.aab
+
+# Local Environment & Secrets
+.env
+.env*.local
+*.local
+
+# Logs & Diagnostics
+logs/
+*.log
+
+# Video / Audio Temporary test exports
+*.webm
+*.mp4
+*.gif
+*.captproj.tmp
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE & Editor Configurations
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.fleet/
