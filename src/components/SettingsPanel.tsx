@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { RecorderOptions } from '../hooks/useRecorder';
-import { Camera, Mic, ShieldAlert, Monitor, Volume2, Keyboard } from 'lucide-react';
+import { Camera, Mic, ShieldAlert, Monitor, Volume2, Keyboard, Sparkles, Languages } from 'lucide-react';
+import { useI18n } from '../i18n/I18nContext';
 
 interface SettingsPanelProps {
   options: RecorderOptions;
@@ -11,6 +12,7 @@ interface SettingsPanelProps {
 type SettingsTab = 'video' | 'audio' | 'webcam' | 'shortcuts';
 
 export function SettingsPanel({ options, setOptions, isRecording = false }: SettingsPanelProps) {
+  const { t, language, setLanguage } = useI18n();
   const [activeTab, setActiveTab] = useState<SettingsTab>('video');
   const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
   const [cams, setCams] = useState<MediaDeviceInfo[]>([]);
@@ -154,7 +156,7 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
           onClick={() => setActiveTab('video')}
         >
           <Monitor size={16} />
-          <span>Vidéo & Qualité</span>
+          <span>{t('settings.tabs.video')}</span>
         </button>
 
         <button
@@ -163,7 +165,7 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
           onClick={() => setActiveTab('audio')}
         >
           <Volume2 size={16} />
-          <span>Audio & Micro</span>
+          <span>{t('settings.tabs.audio')}</span>
         </button>
 
         <button
@@ -172,7 +174,7 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
           onClick={() => setActiveTab('webcam')}
         >
           <Camera size={16} />
-          <span>Webcam (Facecam)</span>
+          <span>{t('settings.tabs.webcam')}</span>
         </button>
 
         <button
@@ -181,7 +183,7 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
           onClick={() => setActiveTab('shortcuts')}
         >
           <Keyboard size={16} />
-          <span>Raccourcis Clavier</span>
+          <span>{t('settings.tabs.shortcuts')}</span>
         </button>
       </div>
 
@@ -190,7 +192,7 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
         <div className="glass-panel settings-card" style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <h2 className="settings-card-title" style={{ fontSize: '15px', marginBottom: '4px' }}>
             <Monitor size={18} className="logo-icon-inline" style={{ verticalAlign: 'middle', marginRight: '8px' }} />
-            Paramètres de Résolution & Codec Vidéo
+            {t('settings.video.title')}
           </h2>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
@@ -231,10 +233,58 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
               onChange={(e) => handleSelect('codec', e.target.value)}
               style={{ padding: '6px 10px', fontSize: '13px' }}
             >
-              <option value="video/webm;codecs=vp9">WebM (Codec VP9 - Haute qualité, fichier léger optimisé)</option>
-              <option value="video/webm;codecs=vp8">WebM (Codec VP8 - Compatibilité maximale)</option>
-              <option value="video/webm;codecs=h264">WebM (Codec H.264 - Encodage matériel rapide)</option>
+              <option value="video/webm;codecs=h264">WebM (Codec H.264 - Accélération matérielle GPU, ultra léger et fluide)</option>
+              <option value="video/webm;codecs=vp9">WebM (Codec VP9 - Haute qualité logicielle)</option>
+              <option value="video/webm;codecs=vp8">WebM (Codec VP8 - Compatibilité universelle)</option>
             </select>
+          </div>
+
+          {/* Capture Surface Preference */}
+          <div className="form-group" style={{ padding: '10px 12px', borderRadius: '8px', background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.25)' }}>
+            <label className="form-label" style={{ fontSize: '12px', color: '#38bdf8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Monitor size={14} />
+              <span>{t('settings.video.captureSourceTitle')}</span>
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '6px' }}>
+              <button
+                type="button"
+                onClick={() => handleSelect('captureSourcePreference', 'screen')}
+                className="btn-toolbar"
+                style={{
+                  fontSize: '11px',
+                  padding: '8px 10px',
+                  justifyContent: 'center',
+                  backgroundColor: (options.captureSourcePreference || 'screen') === 'screen' ? 'rgba(56, 189, 248, 0.25)' : 'rgba(255,255,255,0.04)',
+                  borderColor: (options.captureSourcePreference || 'screen') === 'screen' ? '#38bdf8' : 'var(--border-color)',
+                  color: (options.captureSourcePreference || 'screen') === 'screen' ? '#38bdf8' : 'var(--text-secondary)',
+                  fontWeight: (options.captureSourcePreference || 'screen') === 'screen' ? 700 : 500
+                }}
+              >
+                {t('settings.video.screenDirect')}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSelect('captureSourcePreference', 'window')}
+                className="btn-toolbar"
+                style={{
+                  fontSize: '11px',
+                  padding: '8px 10px',
+                  justifyContent: 'center',
+                  backgroundColor: options.captureSourcePreference === 'window' ? 'rgba(56, 189, 248, 0.25)' : 'rgba(255,255,255,0.04)',
+                  borderColor: options.captureSourcePreference === 'window' ? '#38bdf8' : 'var(--border-color)',
+                  color: options.captureSourcePreference === 'window' ? '#38bdf8' : 'var(--text-secondary)',
+                  fontWeight: options.captureSourcePreference === 'window' ? 700 : 500
+                }}
+              >
+                {t('settings.video.windowDirect')}
+              </button>
+            </div>
+            <p className="form-help" style={{ marginTop: '6px', fontSize: '11px' }}>
+              {(options.captureSourcePreference || 'screen') === 'screen'
+                ? t('settings.video.captureSourceHelpScreen')
+                : t('settings.video.captureSourceHelpWindow')}
+            </p>
           </div>
 
           <div className="form-group" style={{ paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
@@ -246,12 +296,68 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
                 onChange={() => handleCheckbox('showMouseClicks')}
               />
               <span className="form-label" style={{ margin: 0, fontSize: '13px', fontWeight: 600 }}>
-                Ondes lumineuses aux clics de souris (Click Ripples)
+                {t('settings.video.clickRipples')}
               </span>
             </label>
             <p className="form-help" style={{ marginLeft: '26px', marginTop: '2px', fontSize: '11px' }}>
-              Anime un cercle néon sous le curseur à chaque clic pour mettre en valeur vos actions.
+              {t('settings.video.clickRipplesHelp')}
             </p>
+          </div>
+
+          <div className="form-group" style={{ padding: '12px 14px', borderRadius: '8px', background: 'rgba(139, 92, 246, 0.08)', border: '1px solid rgba(139, 92, 246, 0.25)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <label className="form-checkbox-row" style={{ cursor: 'pointer' }}>
+              <input 
+                type="checkbox" 
+                className="form-checkbox" 
+                checked={Boolean(options.enableAutoZoom)}
+                onChange={() => handleCheckbox('enableAutoZoom')}
+              />
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span className="form-label" style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#c084fc', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Sparkles size={15} />
+                  Auto-Zoom Cinématique Intelligent (Screen Studio Effect)
+                </span>
+                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                  Zoome automatiquement et de manière fluide vers vos actions à chaque clic de souris, puis revient en vue globale.
+                </span>
+              </div>
+            </label>
+
+            {options.enableAutoZoom && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginLeft: '26px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                    <span>Grossissement :</span>
+                    <strong style={{ color: 'var(--text-primary)' }}>{options.autoZoomFactor || 1.75}x</strong>
+                  </div>
+                  <input
+                    type="range"
+                    min={1.3}
+                    max={2.5}
+                    step={0.05}
+                    value={options.autoZoomFactor || 1.75}
+                    onChange={(e) => handleSelect('autoZoomFactor', parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: '#8b5cf6' }}
+                  />
+                </div>
+
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                    <span>Durée de maintien :</span>
+                    <strong style={{ color: 'var(--text-primary)' }}>{options.autoZoomDuration || 2.8}s</strong>
+                  </div>
+                  <input
+                    type="range"
+                    min={1.0}
+                    max={5.0}
+                    step={0.2}
+                    value={options.autoZoomDuration || 2.8}
+                    onChange={(e) => handleSelect('autoZoomDuration', parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: '#8b5cf6' }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -561,45 +667,104 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
         </div>
       )}
 
-      {/* Tab 4: Shortcuts Cheatsheet */}
+      {/* Tab 4: Shortcuts Cheatsheet & Language */}
       {activeTab === 'shortcuts' && (
-        <div className="glass-panel settings-card" style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <h2 className="settings-card-title" style={{ fontSize: '15px', marginBottom: '4px' }}>
-            <Keyboard size={18} className="logo-icon-inline" style={{ verticalAlign: 'middle', marginRight: '8px' }} />
-            Raccourcis Clavier Globaux (Actifs partout sur Windows)
-          </h2>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div className="glass-panel settings-card" style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <h2 className="settings-card-title" style={{ fontSize: '15px', marginBottom: '4px' }}>
+              <Keyboard size={18} className="logo-icon-inline" style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+              {t('settings.shortcuts.title')}
+            </h2>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: '13px', fontWeight: 600 }}>Zoom Dynamique</span>
-                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Zoome instantanément sur la souris</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: '8px', background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#38bdf8' }}>🎬 {t('settings.shortcuts.record')}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('settings.shortcuts.recordDesc')}</span>
+                </div>
+                <span className="shortcut-badge" style={{ fontSize: '11px', padding: '4px 8px', borderColor: '#38bdf8', color: '#38bdf8' }}>F6 / Alt + R</span>
               </div>
-              <span className="shortcut-badge" style={{ fontSize: '11px', padding: '4px 8px' }}>F9 / Alt + Z</span>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: '8px', background: 'rgba(234, 179, 8, 0.08)', border: '1px solid rgba(234, 179, 8, 0.3)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#fde047' }}>⏸️ {t('settings.shortcuts.pause')}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('settings.shortcuts.pauseDesc')}</span>
+                </div>
+                <span className="shortcut-badge" style={{ fontSize: '11px', padding: '4px 8px', borderColor: '#fde047', color: '#fde047' }}>F7 / Alt + P</span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600 }}>🔍 {t('settings.shortcuts.zoom')}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('settings.shortcuts.zoomDesc')}</span>
+                </div>
+                <span className="shortcut-badge" style={{ fontSize: '11px', padding: '4px 8px' }}>F9 / Alt + Z</span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600 }}>✏️ {t('settings.shortcuts.draw')}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('settings.shortcuts.drawDesc')}</span>
+                </div>
+                <span className="shortcut-badge" style={{ fontSize: '11px', padding: '4px 8px' }}>F8 / Alt + D</span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600 }}>🧹 {t('settings.shortcuts.clear')}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('settings.shortcuts.clearDesc')}</span>
+                </div>
+                <span className="shortcut-badge" style={{ fontSize: '11px', padding: '4px 8px' }}>F10 / Alt + C</span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600 }}>❌ {t('settings.shortcuts.exitDraw')}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('settings.shortcuts.exitDrawDesc')}</span>
+                </div>
+                <span className="shortcut-badge" style={{ fontSize: '11px', padding: '4px 8px' }}>Esc</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Interface Language Card */}
+          <div className="glass-panel settings-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Languages size={20} className="logo-icon-inline" />
+              <div>
+                <span style={{ fontSize: '14px', fontWeight: 700 }}>{t('settings.language.title')}</span>
+                <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-secondary)' }}>Switch between French and English instantly</p>
+              </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: '13px', fontWeight: 600 }}>Feutre & Dessin</span>
-                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Fige l'écran pour annoter / flécher</span>
-              </div>
-              <span className="shortcut-badge" style={{ fontSize: '11px', padding: '4px 8px' }}>F8 / Alt + D</span>
-            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => setLanguage('fr')}
+                className="btn-toolbar"
+                style={{
+                  padding: '6px 14px',
+                  backgroundColor: language === 'fr' ? 'var(--primary)' : 'rgba(255,255,255,0.04)',
+                  color: language === 'fr' ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: language === 'fr' ? 700 : 500
+                }}
+              >
+                {t('settings.language.french')}
+              </button>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: '13px', fontWeight: 600 }}>Effacer les Dessins</span>
-                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Supprime tous les traits tracés</span>
-              </div>
-              <span className="shortcut-badge" style={{ fontSize: '11px', padding: '4px 8px' }}>F10 / Alt + C</span>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: '13px', fontWeight: 600 }}>Quitter le Feutre</span>
-                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Reprend le tutoriel interactif</span>
-              </div>
-              <span className="shortcut-badge" style={{ fontSize: '11px', padding: '4px 8px' }}>Échap</span>
+              <button
+                type="button"
+                onClick={() => setLanguage('en')}
+                className="btn-toolbar"
+                style={{
+                  padding: '6px 14px',
+                  backgroundColor: language === 'en' ? 'var(--primary)' : 'rgba(255,255,255,0.04)',
+                  color: language === 'en' ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: language === 'en' ? 700 : 500
+                }}
+              >
+                {t('settings.language.english')}
+              </button>
             </div>
           </div>
         </div>

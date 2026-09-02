@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Pencil, ArrowUpRight, Square, Highlighter, Trash2, X, Sparkles } from 'lucide-react';
 import type { DrawTool } from '../hooks/useRecorder';
+import { useI18n } from '../i18n/I18nContext';
 
 export function OverlayCanvas() {
+  const { t } = useI18n();
   const [tool, setTool] = useState<DrawTool>('pen');
   const [color, setColor] = useState('#f43f5e');
   const [isAutoFade, setIsAutoFade] = useState(true);
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
+  const [countdownValue, setCountdownValue] = useState<number | null>(null);
+  const [cutAnimation, setCutAnimation] = useState<{ active: boolean; duration: number } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawingRef = useRef(false);
@@ -14,10 +18,13 @@ export function OverlayCanvas() {
   const strokesRef = useRef<Array<{ id: number; tool: DrawTool; color: string; width: number; points: Array<{ x: number; y: number }>; startTime: number; fadeDuration: number | null }>>([]);
   const persistentBlurMasksRef = useRef<Array<{ id: number; x: number; y: number; width: number; height: number }>>([]);
 
-  // Listen to freeze-snapshot from recorder engine
+  // Listen to freeze-snapshot, countdown ticks, and cut animation from recorder engine
   useEffect(() => {
     let unlistenFreeze: (() => void) | null = null;
     let unlistenUnfreeze: (() => void) | null = null;
+    let unlistenTick: (() => void) | null = null;
+    let unlistenEnd: (() => void) | null = null;
+    let unlistenCut: (() => void) | null = null;
 
     async function setupListeners() {
       try {
@@ -30,6 +37,27 @@ export function OverlayCanvas() {
         unlistenUnfreeze = await listen('unfreeze-snapshot', () => {
           setSnapshotUrl(null);
         });
+        unlistenTick = await listen<{ count: number }>('countdown-tick', (event) => {
+          if (typeof event.payload?.count === 'number') {
+            setCountdownValue(event.payload.count);
+          }
+        });
+        unlistenEnd = await listen('countdown-end', () => {
+          setCountdownValue(null);
+        });
+        unlistenCut = await listen<{ duration: number }>('recording-stopped-animation', (event) => {
+          setCountdownValue(null);
+          setCutAnimation({ active: true, duration: event.payload?.duration || 0 });
+          setTimeout(async () => {
+            setCutAnimation(null);
+            if (!strokesRef.current.length && !snapshotUrl) {
+              try {
+                const { invoke } = await import('@tauri-apps/api/core');
+                await invoke('hide_overlay');
+              } catch {}
+            }
+          }, 1600);
+        });
       } catch (e) {}
     }
 
@@ -37,8 +65,11 @@ export function OverlayCanvas() {
     return () => {
       if (unlistenFreeze) unlistenFreeze();
       if (unlistenUnfreeze) unlistenUnfreeze();
+      if (unlistenTick) unlistenTick();
+      if (unlistenEnd) unlistenEnd();
+      if (unlistenCut) unlistenCut();
     };
-  }, []);
+  }, [snapshotUrl]);
 
   // Resize canvas to full screen resolution
   useEffect(() => {
@@ -437,6 +468,140 @@ export function OverlayCanvas() {
           <span>Fermer (Echap)</span>
         </button>
       </div>
+
+      {/* Screen-Wide Glowing Countdown Overlay */}
+      {countdownValue !== null && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: 'rgba(0, 0, 0, 0.42)',
+          backdropFilter: 'blur(10px)',
+          pointerEvents: 'none',
+          zIndex: 999999
+        }}>
+          <div style={{
+            width: '190px',
+            height: '190px',
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(192, 132, 252, 0.45) 0%, rgba(236, 72, 153, 0.2) 70%, transparent 100%)',
+            border: '4px solid #c084fc',
+            boxShadow: '0 0 60px rgba(192, 132, 252, 0.7), 0 0 100px rgba(236, 72, 153, 0.4), inset 0 0 30px rgba(192, 132, 252, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            animation: 'countdown-pop 0.95s cubic-bezier(0.175, 0.885, 0.32, 1.275) infinite'
+          }}>
+            <span style={{
+              fontSize: countdownValue === 0 ? '42px' : '96px',
+              fontWeight: 900,
+              color: '#ffffff',
+              textShadow: '0 0 30px #c084fc, 0 0 60px #ec4899',
+              fontFamily: 'system-ui, -apple-system, sans-serif'
+            }}>
+              {countdownValue === 0 ? t('overlay.action') : countdownValue}
+            </span>
+          </div>
+
+          <p style={{
+            marginTop: '22px',
+            fontSize: '22px',
+            fontWeight: 800,
+            color: '#f8fafc',
+            letterSpacing: '0.04em',
+            textShadow: '0 2px 12px rgba(0,0,0,0.9)'
+          }}>
+            {countdownValue === 0 ? t('overlay.recordingInProgress') : `${t('overlay.startingIn')} ${countdownValue}s...`}
+          </p>
+
+          <p style={{
+            marginTop: '6px',
+            fontSize: '12px',
+            color: '#cbd5e1',
+            textShadow: '0 1px 6px rgba(0,0,0,0.9)',
+            backgroundColor: 'rgba(15, 23, 42, 0.7)',
+            padding: '4px 12px',
+            borderRadius: '20px',
+            border: '1px solid rgba(255,255,255,0.1)'
+          }}>
+            {t('overlay.shortcutsNotice')}
+          </p>
+        </div>
+      )}
+
+      {/* Cinema Camera Soft Flash */}
+      {cutAnimation?.active && <div className="cut-flash-overlay" />}
+
+      {/* Cinema Cut & "That's a wrap! / C'est dans la boîte !" Animation Badge */}
+      {cutAnimation?.active && (
+        <div className="cut-badge-container">
+          <div className="cut-badge-card">
+            {/* Animated SVG Clapperboard */}
+            <div style={{ position: 'relative', width: '84px', height: '68px', marginBottom: '2px' }}>
+              <svg viewBox="0 0 84 68" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: '100%', height: '100%' }}>
+                {/* Base board */}
+                <rect x="6" y="26" width="72" height="38" rx="6" fill="#0f172a" stroke="#38bdf8" strokeWidth="2.5" />
+                <line x1="24" y1="26" x2="24" y2="64" stroke="rgba(255,255,255,0.12)" strokeWidth="1.5" />
+                <line x1="42" y1="26" x2="42" y2="64" stroke="rgba(255,255,255,0.12)" strokeWidth="1.5" />
+                <line x1="60" y1="26" x2="60" y2="64" stroke="rgba(255,255,255,0.12)" strokeWidth="1.5" />
+                {/* Animated snapping top bar */}
+                <g className="clapper-top-bar">
+                  <rect x="6" y="8" width="72" height="17" rx="3" fill="#1e293b" stroke="#c084fc" strokeWidth="2.5" />
+                  <polygon points="12,8 21,8 15,25 6,25" fill="#ffffff" />
+                  <polygon points="30,8 39,8 33,25 24,25" fill="#ffffff" />
+                  <polygon points="48,8 57,8 51,25 42,25" fill="#ffffff" />
+                  <polygon points="66,8 75,8 69,25 60,25" fill="#ffffff" />
+                </g>
+              </svg>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '26px' }}>🎬</span>
+              <h2 style={{
+                margin: 0,
+                fontSize: '26px',
+                fontWeight: 900,
+                background: 'linear-gradient(135deg, #4ade80 0%, #38bdf8 50%, #c084fc 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                letterSpacing: '-0.02em',
+                textShadow: '0 0 30px rgba(74, 222, 128, 0.4)'
+              }}>
+                {t('overlay.thatsAWrap')}
+              </h2>
+            </div>
+
+            <p style={{
+              margin: 0,
+              fontSize: '14px',
+              fontWeight: 600,
+              color: '#f1f5f9',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}>
+              <span>{t('overlay.cutSaved')}</span>
+            </p>
+
+            {cutAnimation.duration > 0 && (
+              <span style={{
+                fontSize: '11px',
+                fontWeight: 600,
+                color: '#94a3b8',
+                backgroundColor: 'rgba(255,255,255,0.06)',
+                padding: '3px 12px',
+                borderRadius: '12px',
+                border: '1px solid rgba(255,255,255,0.1)'
+              }}>
+                ⏱️ {t('overlay.duration')} {Math.floor(cutAnimation.duration / 60)}m {cutAnimation.duration % 60}s
+              </span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

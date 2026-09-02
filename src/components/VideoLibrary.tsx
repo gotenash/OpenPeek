@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
 import { getAllRecordings, deleteRecording, renameRecording, type SavedVideo } from '../utils/db';
-import { Play, Trash2, Download, Edit2, Film, Calendar, HardDrive, Check, X, Clock, Scissors } from 'lucide-react';
+import { Play, Trash2, Download, Edit2, Film, Calendar, HardDrive, Check, X, Clock, Scissors, Sparkles, Layers, ShieldAlert, Type } from 'lucide-react';
 import { VideoTrimmerModal } from './VideoTrimmerModal';
+import { GifExportModal } from './GifExportModal';
+import { DeviceFrameModal } from './DeviceFrameModal';
+import { AutoRedactModal } from './AutoRedactModal';
+import { SubtitlesStudioModal } from './SubtitlesStudioModal';
 
 interface VideoLibraryProps {
   refreshTrigger: number;
@@ -11,6 +15,10 @@ export function VideoLibrary({ refreshTrigger }: VideoLibraryProps) {
   const [recordings, setRecordings] = useState<SavedVideo[]>([]);
   const [activeVideo, setActiveVideo] = useState<SavedVideo | null>(null);
   const [trimmingVideo, setTrimmingVideo] = useState<SavedVideo | null>(null);
+  const [gifModalVideo, setGifModalVideo] = useState<SavedVideo | null>(null);
+  const [frameModalVideo, setFrameModalVideo] = useState<SavedVideo | null>(null);
+  const [redactModalVideo, setRedactModalVideo] = useState<SavedVideo | null>(null);
+  const [subtitlesModalVideo, setSubtitlesModalVideo] = useState<SavedVideo | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [playbackRate, setPlaybackRate] = useState(1);
@@ -148,18 +156,75 @@ export function VideoLibrary({ refreshTrigger }: VideoLibraryProps) {
               </div>
 
               <div className="video-card-actions">
-                <button className="action-btn" onClick={() => setActiveVideo(video)}>
-                  <Play size={14} fill="currentColor" /> Play
-                </button>
-                <button className="action-btn" onClick={() => setTrimmingVideo(video)} title="Rogner le début ou la fin de la vidéo">
-                  <Scissors size={14} /> Rogner
-                </button>
-                <button className="action-btn download" onClick={() => handleDownload(video)}>
-                  <Download size={14} /> Télécharger
-                </button>
-                <button className="action-btn delete" onClick={() => handleDelete(video.id)}>
-                  <Trash2 size={14} /> Supprimer
-                </button>
+                <div className="video-card-main-actions">
+                  <button className="btn-card-play" onClick={() => setActiveVideo(video)}>
+                    <Play size={13} fill="currentColor" />
+                    <span>Lire</span>
+                  </button>
+
+                  <button 
+                    className="btn-card-icon download" 
+                    onClick={() => handleDownload(video)} 
+                    title="Télécharger la vidéo (WebM)"
+                  >
+                    <Download size={14} />
+                  </button>
+
+                  <button 
+                    className="btn-card-icon delete" 
+                    onClick={() => handleDelete(video.id)} 
+                    title="Supprimer la vidéo"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+
+                <div className="video-card-tools-grid">
+                  <button 
+                    className="video-card-tool-btn trim" 
+                    onClick={() => setTrimmingVideo(video)} 
+                    title="Rogner les extrémités"
+                  >
+                    <Scissors size={13} />
+                    <span>Rogner</span>
+                  </button>
+
+                  <button 
+                    className="video-card-tool-btn subtitles" 
+                    onClick={() => setSubtitlesModalVideo(video)} 
+                    title="Sous-titres & Captions TikTok"
+                  >
+                    <Type size={13} />
+                    <span>Sous-titres</span>
+                  </button>
+
+                  <button 
+                    className="video-card-tool-btn redact" 
+                    onClick={() => setRedactModalVideo(video)} 
+                    title="Flouter les secrets (Auto-Redact)"
+                  >
+                    <ShieldAlert size={13} />
+                    <span>Flouter</span>
+                  </button>
+
+                  <button 
+                    className="video-card-tool-btn frame" 
+                    onClick={() => setFrameModalVideo(video)} 
+                    title="Cadre & Formats réseaux (9:16, 16:9)"
+                  >
+                    <Layers size={13} />
+                    <span>Cadre</span>
+                  </button>
+
+                  <button 
+                    className="video-card-tool-btn gif" 
+                    onClick={() => setGifModalVideo(video)} 
+                    title="Créer un GIF animé"
+                  >
+                    <Sparkles size={13} />
+                    <span>GIF</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -241,7 +306,59 @@ export function VideoLibrary({ refreshTrigger }: VideoLibraryProps) {
                   style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                 >
                   <Scissors size={15} />
-                  <span>Rogner la vidéo</span>
+                  <span>Rogner</span>
+                </button>
+
+                <button
+                  className="btn-secondary"
+                  onClick={() => {
+                    const v = activeVideo;
+                    setActiveVideo(null);
+                    setSubtitlesModalVideo(v);
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#fde047', borderColor: 'rgba(253, 224, 71, 0.4)' }}
+                >
+                  <Type size={15} />
+                  <span>Sous-titres</span>
+                </button>
+
+                <button
+                  className="btn-secondary"
+                  onClick={() => {
+                    const v = activeVideo;
+                    setActiveVideo(null);
+                    setRedactModalVideo(v);
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#f43f5e', borderColor: 'rgba(244, 63, 94, 0.4)' }}
+                >
+                  <ShieldAlert size={15} />
+                  <span>Auto-Redact</span>
+                </button>
+
+                <button
+                  className="btn-secondary"
+                  onClick={() => {
+                    const v = activeVideo;
+                    setActiveVideo(null);
+                    setFrameModalVideo(v);
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.4)' }}
+                >
+                  <Layers size={15} />
+                  <span>Habillage & Réseaux</span>
+                </button>
+
+                <button
+                  className="btn-secondary"
+                  onClick={() => {
+                    const v = activeVideo;
+                    setActiveVideo(null);
+                    setGifModalVideo(v);
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#c084fc', borderColor: 'rgba(192, 132, 252, 0.4)' }}
+                >
+                  <Sparkles size={15} />
+                  <span>Créer un GIF</span>
                 </button>
 
                 <button className="btn-primary" onClick={() => handleDownload(activeVideo)}>
@@ -259,6 +376,50 @@ export function VideoLibrary({ refreshTrigger }: VideoLibraryProps) {
           video={trimmingVideo}
           onClose={() => setTrimmingVideo(null)}
           onTrimComplete={() => {
+            loadRecordings();
+          }}
+        />
+      )}
+
+      {/* GIF Generator Modal */}
+      {gifModalVideo && (
+        <GifExportModal
+          video={gifModalVideo}
+          onClose={() => setGifModalVideo(null)}
+          onSavedToLibrary={() => {
+            loadRecordings();
+          }}
+        />
+      )}
+
+      {/* Device Frame & Gradient Canvas Modal */}
+      {frameModalVideo && (
+        <DeviceFrameModal
+          video={frameModalVideo}
+          onClose={() => setFrameModalVideo(null)}
+          onSavedToLibrary={() => {
+            loadRecordings();
+          }}
+        />
+      )}
+
+      {/* Auto-Redact Modal */}
+      {redactModalVideo && (
+        <AutoRedactModal
+          video={redactModalVideo}
+          onClose={() => setRedactModalVideo(null)}
+          onSavedToLibrary={() => {
+            loadRecordings();
+          }}
+        />
+      )}
+
+      {/* Subtitles Studio Modal */}
+      {subtitlesModalVideo && (
+        <SubtitlesStudioModal
+          video={subtitlesModalVideo}
+          onClose={() => setSubtitlesModalVideo(null)}
+          onSavedToLibrary={() => {
             loadRecordings();
           }}
         />

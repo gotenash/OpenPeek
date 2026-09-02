@@ -12,14 +12,21 @@ import {
   type TimelineClip, 
   type TimelineTitle, 
   type EditorProject, 
+  type BackgroundMusicTrack,
+  AMBIENT_MUSIC_PRESETS,
+  generateAmbientMusicBlob,
   calculateTotalDuration, 
   drawTitleOverlay 
 } from '../utils/videoCompositor';
 import { 
-  Film, Plus, Trash2, ArrowLeft, ArrowRight, Play, Pause, 
+  Film, Plus, Trash2, Play, Pause, 
   Download, Sparkles, Type, Layers, Check, X, Save, FolderOpen, 
-  FileText, Upload, RefreshCw
+  FileText, Upload, RefreshCw, Music, Volume2, VolumeX, Headphones, Mic
 } from 'lucide-react';
+import { GifExportModal } from './GifExportModal';
+import { DeviceFrameModal } from './DeviceFrameModal';
+import { SubtitlesStudioModal } from './SubtitlesStudioModal';
+import { VoiceGeneratorModal } from './VoiceGeneratorModal';
 
 export function VideoEditorStudio() {
   const [libraryVideos, setLibraryVideos] = useState<SavedVideo[]>([]);
@@ -28,10 +35,21 @@ export function VideoEditorStudio() {
   const [savedProjects, setSavedProjects] = useState<SavedProject[]>([]);
   const [isProjectListModalOpen, setIsProjectListModalOpen] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+  const [gifModalVideo, setGifModalVideo] = useState<SavedVideo | null>(null);
+  const [frameModalVideo, setFrameModalVideo] = useState<SavedVideo | null>(null);
+  const [subtitlesModalVideo, setSubtitlesModalVideo] = useState<SavedVideo | null>(null);
+  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState<boolean>(false);
+
+  // Chutier tab ('videos' or 'audio')
+  const [chutierTab, setChutierTab] = useState<'videos' | 'audio'>('videos');
+  const [customAudios, setCustomAudios] = useState<{ id: string; title: string; blob: Blob; url: string }[]>([]);
+  const [previewingAudioId, setPreviewingAudioId] = useState<string | null>(null);
+  const [generatingPresetId, setGeneratingPresetId] = useState<string | null>(null);
 
   const [project, setProject] = useState<EditorProject>({
     clips: [],
-    titles: []
+    titles: [],
+    backgroundMusic: null
   });
 
   const [currentTime, setCurrentTime] = useState(0);
@@ -58,6 +76,9 @@ export function VideoEditorStudio() {
   const videoElementsRef = useRef<Map<string, HTMLVideoElement>>(new Map());
   const animationFrameRef = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioFileInputRef = useRef<HTMLInputElement>(null);
+  const audioPreviewElRef = useRef<HTMLAudioElement | null>(null);
+  const bgMusicAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Load recordings & saved projects from IndexedDB
   const loadLibraryAndProjects = async () => {
@@ -93,6 +114,37 @@ export function VideoEditorStudio() {
     }
   }, [project.clips]);
 
+  // Sync background music audio element with project
+  useEffect(() => {
+    if (project.backgroundMusic && project.backgroundMusic.blob) {
+      if (!bgMusicAudioRef.current) {
+        bgMusicAudioRef.current = document.createElement('audio');
+      }
+      const audioEl = bgMusicAudioRef.current;
+      const url = URL.createObjectURL(project.backgroundMusic.blob);
+      audioEl.src = url;
+      audioEl.loop = project.backgroundMusic.loop !== false;
+      audioEl.volume = project.backgroundMusic.volume ?? 0.15;
+
+      return () => {
+        audioEl.pause();
+        URL.revokeObjectURL(url);
+      };
+    } else {
+      if (bgMusicAudioRef.current) {
+        bgMusicAudioRef.current.pause();
+        bgMusicAudioRef.current.src = '';
+      }
+    }
+  }, [project.backgroundMusic?.id, project.backgroundMusic?.blob]);
+
+  // Sync background music volume
+  useEffect(() => {
+    if (bgMusicAudioRef.current && project.backgroundMusic) {
+      bgMusicAudioRef.current.volume = Math.max(0, Math.min(1, project.backgroundMusic.volume ?? 0.15));
+    }
+  }, [project.backgroundMusic?.volume]);
+
   const totalDuration = calculateTotalDuration(project);
 
   // --- Project Persistence Functions ---
@@ -112,7 +164,14 @@ export function VideoEditorStudio() {
 
       const projectData = {
         clips: serializableClips,
-        titles: project.titles
+        titles: project.titles,
+        backgroundMusic: project.backgroundMusic ? {
+          id: project.backgroundMusic.id,
+          title: project.backgroundMusic.title,
+          volume: project.backgroundMusic.volume,
+          loop: project.backgroundMusic.loop,
+          isPreset: project.backgroundMusic.isPreset
+        } : null
       };
 
       const record: SavedProject = {
@@ -134,7 +193,7 @@ export function VideoEditorStudio() {
   };
 
   // 2. Load project from IndexedDB
-  const handleLoadProject = (saved: SavedProject) => {
+  const handleLoadProject = async (saved: SavedProject) => {
     try {
       const parsed = JSON.parse(saved.data);
       const loadedClips: TimelineClip[] = [];
@@ -153,11 +212,27 @@ export function VideoEditorStudio() {
         }
       }
 
+      let loadedBgMusic: BackgroundMusicTrack | null = null;
+      if (parsed.backgroundMusic) {
+        if (parsed.backgroundMusic.isPreset) {
+          const blob = await generateAmbientMusicBlob(parsed.backgroundMusic.id);
+          loadedBgMusic = {
+            id: parsed.backgroundMusic.id,
+            title: parsed.backgroundMusic.title,
+            blob,
+            volume: parsed.backgroundMusic.volume ?? 0.15,
+            loop: parsed.backgroundMusic.loop !== false,
+            isPreset: true
+          };
+        }
+      }
+
       setProjectId(saved.id);
       setProjectName(saved.title);
       setProject({
         clips: loadedClips,
-        titles: parsed.titles || []
+        titles: parsed.titles || [],
+        backgroundMusic: loadedBgMusic
       });
 
       setCurrentTime(0);
@@ -184,7 +259,7 @@ export function VideoEditorStudio() {
     }
     setProjectId(`proj_${Date.now()}`);
     setProjectName('Nouveau Projet');
-    setProject({ clips: [], titles: [] });
+    setProject({ clips: [], titles: [], backgroundMusic: null });
     setCurrentTime(0);
     setIsPlaying(false);
   };
@@ -203,12 +278,19 @@ export function VideoEditorStudio() {
 
     const exportObj = {
       version: 1,
-      appName: 'Capt Screen',
+      appName: 'OpenPeek Studio',
       projectId,
       projectName,
       date: new Date().toISOString(),
       clips: serializableClips,
-      titles: project.titles
+      titles: project.titles,
+      backgroundMusic: project.backgroundMusic ? {
+        id: project.backgroundMusic.id,
+        title: project.backgroundMusic.title,
+        volume: project.backgroundMusic.volume,
+        loop: project.backgroundMusic.loop,
+        isPreset: project.backgroundMusic.isPreset
+      } : null
     };
 
     const blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: 'application/json' });
@@ -229,7 +311,7 @@ export function VideoEditorStudio() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const text = event.target?.result as string;
         const parsed = JSON.parse(text);
@@ -249,29 +331,138 @@ export function VideoEditorStudio() {
           }
         }
 
+        let loadedBgMusic: BackgroundMusicTrack | null = null;
+        if (parsed.backgroundMusic?.isPreset) {
+          const blob = await generateAmbientMusicBlob(parsed.backgroundMusic.id);
+          loadedBgMusic = {
+            id: parsed.backgroundMusic.id,
+            title: parsed.backgroundMusic.title,
+            blob,
+            volume: parsed.backgroundMusic.volume ?? 0.15,
+            loop: parsed.backgroundMusic.loop !== false,
+            isPreset: true
+          };
+        }
+
         setProjectId(parsed.projectId || `proj_${Date.now()}`);
-        setProjectName(parsed.projectName || file.name.replace('.captproj', ''));
+        setProjectName(parsed.projectName || 'Projet Importé');
         setProject({
           clips: loadedClips,
-          titles: parsed.titles || []
+          titles: parsed.titles || [],
+          backgroundMusic: loadedBgMusic
         });
 
         setCurrentTime(0);
-        setSaveSuccessMsg("Fichier projet importé avec succès !");
+        setSaveSuccessMsg(`Fichier ${file.name} importé !`);
         setTimeout(() => setSaveSuccessMsg(null), 3000);
       } catch (err) {
-        alert("Fichier de projet invalide.");
+        alert("Fichier projet corrompu ou illisible.");
       }
     };
     reader.readAsText(file);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    e.target.value = '';
   };
 
-  // --- Timeline Clip Operations ---
+  // --- Background Music Handlers ---
+
+  const handleSelectPresetMusic = async (presetId: string) => {
+    const preset = AMBIENT_MUSIC_PRESETS.find(p => p.id === presetId);
+    if (!preset) return;
+
+    setGeneratingPresetId(presetId);
+    try {
+      const blob = await generateAmbientMusicBlob(presetId);
+      setProject(prev => ({
+        ...prev,
+        backgroundMusic: {
+          id: preset.id,
+          title: preset.title,
+          blob,
+          volume: prev.backgroundMusic?.volume ?? 0.15,
+          loop: true,
+          isPreset: true
+        }
+      }));
+    } catch (e) {
+      alert("Erreur lors de la génération de l'ambiance musicale.");
+    } finally {
+      setGeneratingPresetId(null);
+    }
+  };
+
+  const handleUploadAudio = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const newAudio = {
+      id: `audio_${Date.now()}`,
+      title: file.name.replace(/\.[^/.]+$/, ""),
+      blob: file,
+      url: URL.createObjectURL(file)
+    };
+
+    setCustomAudios(prev => [newAudio, ...prev]);
+
+    // Automatically apply to timeline as background music
+    setProject(prev => ({
+      ...prev,
+      backgroundMusic: {
+        id: newAudio.id,
+        title: newAudio.title,
+        blob: newAudio.blob,
+        volume: prev.backgroundMusic?.volume ?? 0.15,
+        loop: true,
+        isPreset: false
+      }
+    }));
+
+    e.target.value = '';
+  };
+
+  const handleTogglePreviewAudio = (id: string, blob: Blob) => {
+    if (previewingAudioId === id) {
+      if (audioPreviewElRef.current) {
+        audioPreviewElRef.current.pause();
+      }
+      setPreviewingAudioId(null);
+    } else {
+      if (!audioPreviewElRef.current) {
+        audioPreviewElRef.current = document.createElement('audio');
+      }
+      const audioEl = audioPreviewElRef.current;
+      audioEl.src = URL.createObjectURL(blob);
+      audioEl.volume = 0.5;
+      audioEl.play().catch(() => {});
+      audioEl.onended = () => setPreviewingAudioId(null);
+      setPreviewingAudioId(id);
+    }
+  };
+
+  const handleUpdateMusicVolume = (volume: number) => {
+    setProject(prev => {
+      if (!prev.backgroundMusic) return prev;
+      return {
+        ...prev,
+        backgroundMusic: {
+          ...prev.backgroundMusic,
+          volume: Math.max(0, Math.min(1, volume))
+        }
+      };
+    });
+  };
+
+  const handleRemoveBackgroundMusic = () => {
+    setProject(prev => ({ ...prev, backgroundMusic: null }));
+    if (bgMusicAudioRef.current) {
+      bgMusicAudioRef.current.pause();
+    }
+  };
+
+  // --- Clip Manipulation ---
 
   const addClipToTimeline = (video: SavedVideo) => {
     const newClip: TimelineClip = {
-      id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      id: `clip_${Date.now()}_${Math.random()}`,
       video,
       startTrim: 0,
       endTrim: video.duration || 10,
@@ -284,212 +475,191 @@ export function VideoEditorStudio() {
     }));
   };
 
-  const removeClip = (clipId: string) => {
+  const removeClipFromTimeline = (id: string) => {
     setProject((prev) => ({
       ...prev,
-      clips: prev.clips.filter((c) => c.id !== clipId)
+      clips: prev.clips.filter((c) => c.id !== id)
     }));
   };
 
   const moveClip = (index: number, direction: 'left' | 'right') => {
-    const targetIdx = direction === 'left' ? index - 1 : index + 1;
-    if (targetIdx < 0 || targetIdx >= project.clips.length) return;
-
-    setProject((prev) => {
-      const nextClips = [...prev.clips];
-      const temp = nextClips[index];
-      nextClips[index] = nextClips[targetIdx];
-      nextClips[targetIdx] = temp;
-      return { ...prev, clips: nextClips };
-    });
+    const newClips = [...project.clips];
+    const targetIndex = direction === 'left' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= newClips.length) return;
+    const temp = newClips[index];
+    newClips[index] = newClips[targetIndex];
+    newClips[targetIndex] = temp;
+    setProject((prev) => ({ ...prev, clips: newClips }));
   };
 
-  const updateClip = (clipId: string, updates: Partial<TimelineClip>) => {
+  const updateClipTrim = (id: string, startTrim: number, endTrim: number) => {
     setProject((prev) => ({
       ...prev,
-      clips: prev.clips.map((c) => (c.id === clipId ? { ...c, ...updates } : c))
+      clips: prev.clips.map((c) => c.id === id ? { ...c, startTrim, endTrim } : c)
     }));
   };
 
-  // --- Title Operations ---
+  const updateClipTransition = (id: string, transitionToNext: any, transitionDuration: number) => {
+    setProject((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) => c.id === id ? { ...c, transitionToNext, transitionDuration } : c)
+    }));
+  };
+
+  // --- Title Manipulation ---
 
   const handleSaveTitle = () => {
     if (!titleForm.text.trim()) return;
-
-    const titleToSave = {
+    const newTitle: TimelineTitle = {
       ...titleForm,
       id: titleForm.id || `title_${Date.now()}`
     };
-
     setProject((prev) => {
-      const exists = prev.titles.some((t) => t.id === titleToSave.id);
-      if (exists) {
-        return {
-          ...prev,
-          titles: prev.titles.map((t) => (t.id === titleToSave.id ? titleToSave : t))
-        };
-      }
+      const exists = prev.titles.some((t) => t.id === newTitle.id);
       return {
         ...prev,
-        titles: [...prev.titles, titleToSave]
+        titles: exists
+          ? prev.titles.map((t) => t.id === newTitle.id ? newTitle : t)
+          : [...prev.titles, newTitle]
       };
     });
-
     setIsTitleModalOpen(false);
   };
 
-  const removeTitle = (titleId: string) => {
+  const removeTitle = (id: string) => {
     setProject((prev) => ({
       ...prev,
-      titles: prev.titles.filter((t) => t.id !== titleId)
+      titles: prev.titles.filter((t) => t.id !== id)
     }));
   };
 
-  // --- Playback & Transport Engine ---
-
-  const handleSeek = (targetTime: number) => {
-    setCurrentTime(targetTime);
-    
-    let cumulative = 0;
-    for (let i = 0; i < project.clips.length; i++) {
-      const clip = project.clips[i];
-      const clipDuration = Math.max(0.1, clip.endTrim - clip.startTrim);
-      const isLast = i === project.clips.length - 1;
-      const transDur = (!isLast && clip.transitionToNext !== 'none')
-        ? Math.min(clip.transitionDuration, clipDuration / 2)
-        : 0;
-
-      const clipStart = cumulative;
-      const clipEnd = cumulative + clipDuration;
-
-      const videoEl = videoElementsRef.current.get(clip.id);
-      if (videoEl) {
-        if (targetTime >= clipStart && targetTime <= clipEnd) {
-          const targetInClip = (targetTime - clipStart) + clip.startTrim;
-          videoEl.currentTime = Math.max(clip.startTrim, Math.min(clip.endTrim, targetInClip));
-        } else {
-          videoEl.pause();
-        }
-      }
-
-      cumulative += clipDuration - transDur;
-    }
-  };
+  // --- Playback Engine & Interactive Seek ---
 
   const togglePlay = () => {
-    if (project.clips.length === 0 || totalDuration <= 0) return;
-
     if (isPlaying) {
-      videoElementsRef.current.forEach(v => v.pause());
+      videoElementsRef.current.forEach((v) => v.pause());
+      if (bgMusicAudioRef.current) bgMusicAudioRef.current.pause();
       setIsPlaying(false);
     } else {
-      if (currentTime >= totalDuration - 0.1) {
-        handleSeek(0);
+      if (currentTime >= totalDuration) {
+        setCurrentTime(0);
       }
       setIsPlaying(true);
+      if (bgMusicAudioRef.current && project.backgroundMusic) {
+        bgMusicAudioRef.current.play().catch(() => {});
+      }
     }
   };
 
+  const handleSeek = (time: number) => {
+    setCurrentTime(time);
+    if (!isPlaying) {
+      renderStaticPreviewAt(time);
+    }
+    if (bgMusicAudioRef.current && project.backgroundMusic) {
+      bgMusicAudioRef.current.currentTime = time % (bgMusicAudioRef.current.duration || 16);
+    }
+  };
+
+  // Live Canvas Rendering Loop
   useEffect(() => {
+    const canvas = previewCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
     if (!isPlaying) {
       renderStaticPreviewAt(currentTime);
       return;
     }
 
     let lastTime = performance.now();
-    let currentMasterTime = currentTime;
 
     const playbackLoop = () => {
       const now = performance.now();
       const dt = (now - lastTime) / 1000;
       lastTime = now;
 
-      currentMasterTime += dt;
-      if (currentMasterTime >= totalDuration) {
-        setIsPlaying(false);
-        setCurrentTime(0);
-        videoElementsRef.current.forEach(v => v.pause());
-        return;
+      setCurrentTime((prev) => {
+        const nextTime = prev + dt;
+        if (nextTime >= totalDuration) {
+          videoElementsRef.current.forEach((v) => v.pause());
+          if (bgMusicAudioRef.current) bgMusicAudioRef.current.pause();
+          setIsPlaying(false);
+          return totalDuration;
+        }
+        return nextTime;
+      });
+
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      let cumulative = 0;
+      for (let i = 0; i < project.clips.length; i++) {
+        const clip = project.clips[i];
+        const clipDuration = Math.max(0.1, clip.endTrim - clip.startTrim);
+        const isLast = i === project.clips.length - 1;
+        const transDur = (!isLast && clip.transitionToNext !== 'none')
+          ? Math.min(clip.transitionDuration, clipDuration / 2)
+          : 0;
+
+        const clipStart = cumulative;
+        const clipEnd = cumulative + clipDuration;
+        const videoEl = videoElementsRef.current.get(clip.id);
+
+        if (currentTime >= clipStart && currentTime <= clipEnd) {
+          if (videoEl) {
+            if (videoEl.paused && isPlaying) {
+              videoEl.currentTime = (currentTime - clipStart) + clip.startTrim;
+              videoEl.play().catch(() => {});
+            }
+            if (videoEl.readyState >= 2) {
+              ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+            }
+          }
+
+          // Render transition to next clip
+          if (!isLast && clip.transitionToNext !== 'none' && currentTime > clipEnd - transDur) {
+            const transProgress = (currentTime - (clipEnd - transDur)) / transDur;
+            const nextClip = project.clips[i + 1];
+            const nextVideoEl = videoElementsRef.current.get(nextClip.id);
+
+            if (nextVideoEl) {
+              if (nextVideoEl.paused && isPlaying) {
+                nextVideoEl.currentTime = nextClip.startTrim + (transProgress * transDur);
+                nextVideoEl.play().catch(() => {});
+              }
+
+              if (nextVideoEl.readyState >= 2) {
+                ctx.save();
+                if (clip.transitionToNext === 'crossfade') {
+                  ctx.globalAlpha = transProgress;
+                  ctx.drawImage(nextVideoEl, 0, 0, canvas.width, canvas.height);
+                } else if (clip.transitionToNext === 'fade-black') {
+                  ctx.fillStyle = '#000000';
+                  ctx.globalAlpha = Math.sin(transProgress * Math.PI);
+                  ctx.fillRect(0, 0, canvas.width, canvas.height);
+                } else if (clip.transitionToNext === 'slide') {
+                  const offsetX = (1.0 - transProgress) * canvas.width;
+                  ctx.drawImage(nextVideoEl, offsetX, 0, canvas.width, canvas.height);
+                }
+                ctx.restore();
+              }
+            }
+          }
+        } else {
+          if (videoEl && !videoEl.paused && (currentTime < clipStart - 1 || currentTime > clipEnd + 1)) {
+            videoEl.pause();
+          }
+        }
+
+        cumulative += clipDuration - transDur;
       }
 
-      setCurrentTime(currentMasterTime);
-
-      const canvas = previewCanvasRef.current;
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.fillStyle = '#0a0a0a';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-          let cumulative = 0;
-          for (let i = 0; i < project.clips.length; i++) {
-            const clip = project.clips[i];
-            const clipDuration = Math.max(0.1, clip.endTrim - clip.startTrim);
-            const isLast = i === project.clips.length - 1;
-            const transDur = (!isLast && clip.transitionToNext !== 'none')
-              ? Math.min(clip.transitionDuration, clipDuration / 2)
-              : 0;
-
-            const clipStart = cumulative;
-            const clipEnd = cumulative + clipDuration;
-            const videoEl = videoElementsRef.current.get(clip.id);
-
-            if (currentMasterTime >= clipStart && currentMasterTime <= clipEnd) {
-              if (videoEl) {
-                if (videoEl.paused) {
-                  const targetInClip = (currentMasterTime - clipStart) + clip.startTrim;
-                  videoEl.currentTime = targetInClip;
-                  videoEl.play().catch(() => {});
-                }
-                if (videoEl.readyState >= 2) {
-                  ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-                }
-              }
-
-              // Active transition to next clip
-              if (!isLast && clip.transitionToNext !== 'none' && currentMasterTime > clipEnd - transDur) {
-                const transProgress = (currentMasterTime - (clipEnd - transDur)) / transDur;
-                const nextClip = project.clips[i + 1];
-                const nextVideoEl = videoElementsRef.current.get(nextClip.id);
-
-                if (nextVideoEl) {
-                  if (nextVideoEl.paused) {
-                    nextVideoEl.currentTime = nextClip.startTrim + (transProgress * transDur);
-                    nextVideoEl.play().catch(() => {});
-                  }
-
-                  if (nextVideoEl.readyState >= 2) {
-                    ctx.save();
-                    if (clip.transitionToNext === 'crossfade') {
-                      ctx.globalAlpha = transProgress;
-                      ctx.drawImage(nextVideoEl, 0, 0, canvas.width, canvas.height);
-                    } else if (clip.transitionToNext === 'fade-black') {
-                      ctx.fillStyle = '#000000';
-                      ctx.globalAlpha = Math.sin(transProgress * Math.PI);
-                      ctx.fillRect(0, 0, canvas.width, canvas.height);
-                    } else if (clip.transitionToNext === 'slide') {
-                      const offsetX = (1.0 - transProgress) * canvas.width;
-                      ctx.drawImage(nextVideoEl, offsetX, 0, canvas.width, canvas.height);
-                    }
-                    ctx.restore();
-                  }
-                }
-              }
-            } else {
-              if (videoEl && !videoEl.paused && (currentMasterTime < clipStart - 1 || currentMasterTime > clipEnd + 1)) {
-                videoEl.pause();
-              }
-            }
-
-            cumulative += clipDuration - transDur;
-          }
-
-          // Overlay titles
-          for (const title of project.titles) {
-            if (currentMasterTime >= title.startTime && currentMasterTime <= title.startTime + title.duration) {
-              drawTitleOverlay(ctx, title, canvas.width, canvas.height, currentMasterTime - title.startTime);
-            }
-          }
+      // Overlay active titles
+      for (const title of project.titles) {
+        if (currentTime >= title.startTime && currentTime <= title.startTime + title.duration) {
+          drawTitleOverlay(ctx, title, canvas.width, canvas.height, currentTime - title.startTime);
         }
       }
 
@@ -560,6 +730,7 @@ export function VideoEditorStudio() {
     }
 
     videoElementsRef.current.forEach(v => v.pause());
+    if (bgMusicAudioRef.current) bgMusicAudioRef.current.pause();
     setIsPlaying(false);
     setIsExporting(true);
     setExportProgress(0);
@@ -572,11 +743,16 @@ export function VideoEditorStudio() {
     // Build mixed Audio + Video stream for MediaRecorder
     let combinedStream: MediaStream = exportCanvas.captureStream(30);
     let exportAudioCtx: AudioContext | null = null;
+    let bgExportAudioEl: HTMLAudioElement | null = null;
 
     try {
       exportAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (exportAudioCtx.state === 'suspended') {
+        await exportAudioCtx.resume();
+      }
       const dest = exportAudioCtx.createMediaStreamDestination();
 
+      // 1. Connect video clips audio
       for (const clip of project.clips) {
         const videoEl = videoElementsRef.current.get(clip.id);
         if (videoEl) {
@@ -590,6 +766,24 @@ export function VideoEditorStudio() {
           } catch (audioErr) {
             console.warn("Audio node connection:", audioErr);
           }
+        }
+      }
+
+      // 2. Connect Background Music with dedicated GainNode
+      if (project.backgroundMusic && project.backgroundMusic.blob) {
+        bgExportAudioEl = document.createElement('audio');
+        bgExportAudioEl.src = URL.createObjectURL(project.backgroundMusic.blob);
+        bgExportAudioEl.loop = project.backgroundMusic.loop !== false;
+        
+        try {
+          const bgSource = exportAudioCtx.createMediaElementSource(bgExportAudioEl);
+          const bgGain = exportAudioCtx.createGain();
+          bgGain.gain.value = project.backgroundMusic.volume ?? 0.15;
+          bgSource.connect(bgGain);
+          bgGain.connect(dest);
+          bgExportAudioEl.play().catch(() => {});
+        } catch (e) {
+          console.warn("Bg music audio route error:", e);
         }
       }
 
@@ -630,6 +824,10 @@ export function VideoEditorStudio() {
       if (exportTime >= totalDuration) {
         mediaRecorder.stop();
         videoElementsRef.current.forEach(v => v.pause());
+        if (bgExportAudioEl) {
+          bgExportAudioEl.pause();
+          URL.revokeObjectURL(bgExportAudioEl.src);
+        }
         return;
       }
 
@@ -751,13 +949,20 @@ export function VideoEditorStudio() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%' }}>
-      {/* Hidden file input for .captproj import */}
+      {/* Hidden file inputs */}
       <input
         type="file"
         ref={fileInputRef}
         accept=".captproj,.json"
         style={{ display: 'none' }}
         onChange={handleImportProjectFile}
+      />
+      <input
+        type="file"
+        ref={audioFileInputRef}
+        accept="audio/*,.mp3,.wav,.m4a,.ogg"
+        style={{ display: 'none' }}
+        onChange={handleUploadAudio}
       />
 
       {/* Top Project Bar */}
@@ -833,58 +1038,246 @@ export function VideoEditorStudio() {
       </div>
 
       {/* Middle Split: Media Bin & Master Preview Player */}
-      <div style={{ display: 'grid', gridTemplateColumns: '250px 1fr', gap: '12px' }}>
-        {/* Media Bin */}
+      <div style={{ display: 'grid', gridTemplateColumns: '270px 1fr', gap: '12px' }}>
+        {/* Media Bin (Chutier) */}
         <div className="glass-panel" style={{ padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px', height: '220px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Film size={14} color="#c084fc" />
-              Chutier ({libraryVideos.length} clips)
-            </span>
+          {/* Chutier Tabs */}
+          <div style={{ display: 'flex', gap: '4px', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px' }}>
+            <button
+              onClick={() => setChutierTab('videos')}
+              style={{
+                flex: 1,
+                padding: '4px 6px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: 600,
+                backgroundColor: chutierTab === 'videos' ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
+                border: chutierTab === 'videos' ? '1px solid #c084fc' : '1px solid transparent',
+                color: chutierTab === 'videos' ? '#c084fc' : 'var(--text-secondary)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '5px'
+              }}
+            >
+              <Film size={12} />
+              <span>Vidéos ({libraryVideos.length})</span>
+            </button>
+
+            <button
+              onClick={() => setChutierTab('audio')}
+              style={{
+                flex: 1,
+                padding: '4px 6px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: 600,
+                backgroundColor: chutierTab === 'audio' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                border: chutierTab === 'audio' ? '1px solid #38bdf8' : '1px solid transparent',
+                color: chutierTab === 'audio' ? '#38bdf8' : 'var(--text-secondary)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '5px'
+              }}
+            >
+              <Music size={12} />
+              <span>Musiques</span>
+            </button>
           </div>
 
-          <div style={{ flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px' }}>
-            {libraryVideos.map((v) => (
-              <div 
-                key={v.id} 
-                style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'space-between', 
-                  padding: '5px 7px', 
-                  borderRadius: '5px', 
-                  backgroundColor: 'rgba(255,255,255,0.03)',
-                  border: '1px solid var(--border-color)',
-                  gap: '6px'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
-                  {v.thumbnail ? (
-                    <img src={v.thumbnail} alt="" style={{ width: '32px', height: '20px', objectFit: 'cover', borderRadius: '3px' }} />
-                  ) : (
-                    <Film size={16} color="#94a3b8" />
-                  )}
-                  <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 500, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', maxWidth: '140px' }}>{v.title}</span>
-                    <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{formatTime(v.duration)}</span>
-                  </div>
-                </div>
-                <button
-                  className="btn-toolbar"
-                  style={{ padding: '2px 5px', fontSize: '10px', backgroundColor: 'rgba(139, 92, 246, 0.25)', color: '#c084fc' }}
-                  onClick={() => addClipToTimeline(v)}
-                  title="Ajouter à la timeline"
+          {/* Videos Tab Content */}
+          {chutierTab === 'videos' && (
+            <div style={{ flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              {libraryVideos.map((v) => (
+                <div 
+                  key={v.id} 
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'space-between', 
+                    padding: '5px 7px', 
+                    borderRadius: '5px', 
+                    backgroundColor: 'rgba(255,255,255,0.03)',
+                    border: '1px solid var(--border-color)',
+                    gap: '6px'
+                  }}
                 >
-                  <Plus size={11} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                    {v.thumbnail ? (
+                      <img src={v.thumbnail} alt="" style={{ width: '32px', height: '20px', objectFit: 'cover', borderRadius: '3px' }} />
+                    ) : (
+                      <Film size={16} color="#94a3b8" />
+                    )}
+                    <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 500, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', maxWidth: '140px' }}>{v.title}</span>
+                      <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{formatTime(v.duration)}</span>
+                    </div>
+                  </div>
+                  <button
+                    className="btn-toolbar"
+                    style={{ padding: '2px 5px', fontSize: '10px', backgroundColor: 'rgba(139, 92, 246, 0.25)', color: '#c084fc' }}
+                    onClick={() => addClipToTimeline(v)}
+                    title="Ajouter à la timeline"
+                  >
+                    <Plus size={11} />
+                  </button>
+                </div>
+              ))}
+              {libraryVideos.length === 0 && (
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', padding: '16px 0' }}>
+                  Aucune capture vidéo enregistrée.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Audio Tab Content */}
+          {chutierTab === 'audio' && (
+            <div style={{ flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
+                {/* Voice Generator Button */}
+                <button
+                  className="btn-primary"
+                  onClick={() => setIsVoiceModalOpen(true)}
+                  style={{ padding: '4px 6px', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', background: 'linear-gradient(135deg, #c084fc, #ec4899)' }}
+                  title="Générer une voix off IA à partir de votre texte"
+                >
+                  <Mic size={11} />
+                  <span>🎙️ Voix Off IA</span>
+                </button>
+
+                {/* Upload Button */}
+                <button
+                  className="btn-secondary"
+                  onClick={() => audioFileInputRef.current?.click()}
+                  style={{ padding: '4px 6px', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                  title="Importer un fichier audio existant (MP3, WAV, M4A)"
+                >
+                  <Upload size={11} />
+                  <span>Importer MP3</span>
                 </button>
               </div>
-            ))}
-            {libraryVideos.length === 0 && (
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', padding: '16px 0' }}>
-                Aucune capture enregistrée.
+
+              {/* Ambient Presets */}
+              <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginTop: '2px' }}>
+                Ambiances Libres de Droits :
               </div>
-            )}
-          </div>
+              {AMBIENT_MUSIC_PRESETS.map((preset) => {
+                const isSelected = project.backgroundMusic?.id === preset.id;
+                return (
+                  <div
+                    key={preset.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '4px 6px',
+                      borderRadius: '4px',
+                      backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255,255,255,0.02)',
+                      border: isSelected ? '1px solid #38bdf8' : '1px solid var(--border-color)',
+                      fontSize: '11px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', maxWidth: '170px' }}>
+                      <span style={{ fontWeight: 600, color: isSelected ? '#38bdf8' : '#ffffff', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                        {preset.title}
+                      </span>
+                      <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{preset.genre} • {preset.bpm} BPM</span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <button
+                        onClick={() => handleSelectPresetMusic(preset.id)}
+                        disabled={generatingPresetId === preset.id}
+                        style={{
+                          background: isSelected ? '#38bdf8' : 'rgba(56, 189, 248, 0.2)',
+                          color: isSelected ? '#000000' : '#38bdf8',
+                          border: 'none',
+                          borderRadius: '3px',
+                          padding: '2px 6px',
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                        title="Ajouter comme musique de fond sur la timeline"
+                      >
+                        {generatingPresetId === preset.id ? '...' : (isSelected ? '✓ Actif' : '+ Ajouter')}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Custom Uploaded Audios */}
+              {customAudios.length > 0 && (
+                <>
+                  <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-secondary)', marginTop: '4px' }}>
+                    Mes Fichiers Importés :
+                  </div>
+                  {customAudios.map((audio) => {
+                    const isSelected = project.backgroundMusic?.id === audio.id;
+                    const isPreviewing = previewingAudioId === audio.id;
+                    return (
+                      <div
+                        key={audio.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '4px 6px',
+                          borderRadius: '4px',
+                          backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255,255,255,0.02)',
+                          border: isSelected ? '1px solid #38bdf8' : '1px solid var(--border-color)',
+                          fontSize: '11px'
+                        }}
+                      >
+                        <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>
+                          {audio.title}
+                        </span>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button
+                            onClick={() => handleTogglePreviewAudio(audio.id, audio.blob)}
+                            style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '2px' }}
+                            title="Écouter un extrait"
+                          >
+                            {isPreviewing ? <Pause size={12} /> : <Play size={12} />}
+                          </button>
+                          <button
+                            onClick={() => setProject(prev => ({
+                              ...prev,
+                              backgroundMusic: {
+                                id: audio.id,
+                                title: audio.title,
+                                blob: audio.blob,
+                                volume: prev.backgroundMusic?.volume ?? 0.15,
+                                loop: true,
+                                isPreset: false
+                              }
+                            }))}
+                            style={{
+                              background: isSelected ? '#38bdf8' : 'rgba(56, 189, 248, 0.2)',
+                              color: isSelected ? '#000000' : '#38bdf8',
+                              border: 'none',
+                              borderRadius: '3px',
+                              padding: '2px 5px',
+                              fontSize: '10px',
+                              fontWeight: 600,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {isSelected ? '✓ Actif' : '+ Ajouter'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Master Monitor Preview */}
@@ -947,10 +1340,72 @@ export function VideoEditorStudio() {
               </button>
 
               {exportedBlob && (
-                <button className="btn-secondary" onClick={handleDownloadExported} style={{ fontSize: '11px', padding: '3px 8px' }}>
-                  <Download size={12} />
-                  <span>Télécharger</span>
-                </button>
+                <>
+                  <button 
+                    className="btn-secondary" 
+                    onClick={() => {
+                      setSubtitlesModalVideo({
+                        id: projectId,
+                        title: projectName,
+                        blob: exportedBlob,
+                        thumbnail: '',
+                        duration: Math.round(totalDuration),
+                        size: exportedBlob.size,
+                        date: new Date().toISOString()
+                      });
+                    }} 
+                    style={{ fontSize: '11px', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: '4px', color: '#fde047', borderColor: 'rgba(253, 224, 71, 0.4)' }}
+                    title="Générer des sous-titres et captions dynamiques pour ce montage"
+                  >
+                    <Type size={12} />
+                    <span>Sous-titres</span>
+                  </button>
+
+                  <button 
+                    className="btn-secondary" 
+                    onClick={() => {
+                      setFrameModalVideo({
+                        id: projectId,
+                        title: projectName,
+                        blob: exportedBlob,
+                        thumbnail: '',
+                        duration: Math.round(totalDuration),
+                        size: exportedBlob.size,
+                        date: new Date().toISOString()
+                      });
+                    }} 
+                    style={{ fontSize: '11px', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: '4px', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.4)' }}
+                    title="Ajouter un habillage gradient, cadre macOS et formats TikTok/YouTube/LinkedIn"
+                  >
+                    <Layers size={12} />
+                    <span>Habillage</span>
+                  </button>
+
+                  <button 
+                    className="btn-secondary" 
+                    onClick={() => {
+                      setGifModalVideo({
+                        id: projectId,
+                        title: projectName,
+                        blob: exportedBlob,
+                        thumbnail: '',
+                        duration: Math.round(totalDuration),
+                        size: exportedBlob.size,
+                        date: new Date().toISOString()
+                      });
+                    }} 
+                    style={{ fontSize: '11px', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: '4px', color: '#c084fc', borderColor: 'rgba(192, 132, 252, 0.4)' }}
+                    title="Générer un GIF animé à partir de ce montage"
+                  >
+                    <Sparkles size={12} />
+                    <span>Créer un GIF</span>
+                  </button>
+
+                  <button className="btn-secondary" onClick={handleDownloadExported} style={{ fontSize: '11px', padding: '3px 8px' }}>
+                    <Download size={12} />
+                    <span>Télécharger</span>
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -977,7 +1432,7 @@ export function VideoEditorStudio() {
 
         {/* Track 1: Titles */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'rgba(0,0,0,0.25)', padding: '5px 8px', borderRadius: '5px' }}>
-          <span style={{ fontSize: '10px', width: '70px', color: '#c084fc', fontWeight: 600 }}>🔤 Titres ({project.titles.length})</span>
+          <span style={{ fontSize: '10px', width: '90px', color: '#c084fc', fontWeight: 600 }}>🔤 Titres ({project.titles.length})</span>
           <div style={{ display: 'flex', gap: '6px', flexGrow: 1, overflowX: 'auto' }}>
             {project.titles.map((t) => (
               <div
@@ -1011,7 +1466,7 @@ export function VideoEditorStudio() {
 
         {/* Track 2: Video Clips & Transitions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'rgba(0,0,0,0.25)', padding: '6px 8px', borderRadius: '5px', overflowX: 'auto' }}>
-          <span style={{ fontSize: '10px', width: '70px', color: '#06b6d4', fontWeight: 600 }}>🎬 Vidéos ({project.clips.length})</span>
+          <span style={{ fontSize: '10px', width: '90px', color: '#06b6d4', fontWeight: 600 }}>🎬 Vidéos ({project.clips.length})</span>
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             {project.clips.map((clip, idx) => (
@@ -1034,41 +1489,75 @@ export function VideoEditorStudio() {
                     </span>
                     <button
                       style={{ background: 'transparent', border: 'none', color: '#fb7185', cursor: 'pointer', padding: 0 }}
-                      onClick={() => removeClip(clip.id)}
+                      onClick={() => removeClipFromTimeline(clip.id)}
+                      title="Supprimer ce clip"
                     >
                       <Trash2 size={11} />
                     </button>
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '4px', fontSize: '9px' }}>
-                    <div style={{ display: 'flex', gap: '2px' }}>
-                      <button className="btn-toolbar" style={{ padding: '1px 3px' }} disabled={idx === 0} onClick={() => moveClip(idx, 'left')}>
-                        <ArrowLeft size={9} />
-                      </button>
-                      <button className="btn-toolbar" style={{ padding: '1px 3px' }} disabled={idx === project.clips.length - 1} onClick={() => moveClip(idx, 'right')}>
-                        <ArrowRight size={9} />
-                      </button>
-                    </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '9px', color: 'var(--text-muted)' }}>
+                    <span>Début: {clip.startTrim.toFixed(1)}s</span>
+                    <span>Fin: {clip.endTrim.toFixed(1)}s</span>
+                  </div>
 
-                    <span style={{ color: '#06b6d4' }}>
-                      {clip.startTrim.toFixed(1)}s à {clip.endTrim.toFixed(1)}s
-                    </span>
+                  <div style={{ display: 'flex', gap: '4px', marginTop: '2px' }}>
+                    <button
+                      className="btn-toolbar"
+                      style={{ padding: '2px 4px', fontSize: '9px' }}
+                      disabled={idx === 0}
+                      onClick={() => moveClip(idx, 'left')}
+                      title="Déplacer vers la gauche"
+                    >
+                      ◀
+                    </button>
+                    <button
+                      className="btn-toolbar"
+                      style={{ padding: '2px 4px', fontSize: '9px' }}
+                      disabled={idx === project.clips.length - 1}
+                      onClick={() => moveClip(idx, 'right')}
+                      title="Déplacer vers la droite"
+                    >
+                      ▶
+                    </button>
+                    <input
+                      type="number"
+                      min={0}
+                      max={clip.endTrim - 0.5}
+                      step={0.5}
+                      value={clip.startTrim}
+                      onChange={(e) => updateClipTrim(clip.id, parseFloat(e.target.value) || 0, clip.endTrim)}
+                      style={{ width: '42px', fontSize: '9px', padding: '1px 3px' }}
+                      className="form-input"
+                      title="Rognage début (s)"
+                    />
+                    <input
+                      type="number"
+                      min={clip.startTrim + 0.5}
+                      max={clip.video.duration || 999}
+                      step={0.5}
+                      value={clip.endTrim}
+                      onChange={(e) => updateClipTrim(clip.id, clip.startTrim, parseFloat(e.target.value) || 10)}
+                      style={{ width: '42px', fontSize: '9px', padding: '1px 3px' }}
+                      className="form-input"
+                      title="Rognage fin (s)"
+                    />
                   </div>
                 </div>
 
+                {/* Transition Selector between clips */}
                 {idx < project.clips.length - 1 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px' }}>
-                    <span style={{ fontSize: '8px', color: 'var(--text-muted)' }}>Transition</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
                     <select
-                      className="form-input"
-                      style={{ padding: '1px 3px', fontSize: '9px', width: '80px' }}
                       value={clip.transitionToNext}
-                      onChange={(e) => updateClip(clip.id, { transitionToNext: e.target.value as any })}
+                      onChange={(e) => updateClipTransition(clip.id, e.target.value, clip.transitionDuration)}
+                      style={{ fontSize: '9px', padding: '2px 3px', backgroundColor: 'rgba(15, 23, 42, 0.8)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.4)', borderRadius: '3px' }}
+                      title="Transition vers le clip suivant"
                     >
-                      <option value="none">Coupure</option>
-                      <option value="crossfade">Fondu</option>
-                      <option value="fade-black">Au Noir</option>
-                      <option value="slide">Glissement</option>
+                      <option value="none">Coupe (Cut)</option>
+                      <option value="crossfade">Fondu (Crossfade)</option>
+                      <option value="fade-black">Fondu au Noir</option>
+                      <option value="slide">Glissement (Slide)</option>
                     </select>
                   </div>
                 )}
@@ -1076,44 +1565,117 @@ export function VideoEditorStudio() {
             ))}
 
             {project.clips.length === 0 && (
-              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Glissez ou cliquez sur « + » sur un clip du chutier pour l'insérer ici.</span>
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                Aucun clip vidéo. Cliquez sur le « + » d'une vidéo dans le Chutier pour l'ajouter.
+              </span>
             )}
           </div>
         </div>
+
+        {/* Track 3: Background Music & Audio Ducking */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'rgba(0,0,0,0.25)', padding: '6px 8px', borderRadius: '5px' }}>
+          <span style={{ fontSize: '10px', width: '90px', color: '#38bdf8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Music size={11} />
+            Musique de Fond
+          </span>
+
+          {project.backgroundMusic ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexGrow: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.4)', padding: '3px 8px', borderRadius: '4px' }}>
+                <Headphones size={12} color="#38bdf8" />
+                <span style={{ fontSize: '10px', fontWeight: 600, color: '#38bdf8' }}>{project.backgroundMusic.title}</span>
+                <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>({project.backgroundMusic.isPreset ? 'Ambiance' : 'Fichier'})</span>
+                <button
+                  onClick={handleRemoveBackgroundMusic}
+                  style={{ background: 'none', border: 'none', color: '#fb7185', cursor: 'pointer', padding: '0 2px' }}
+                  title="Retirer la musique de fond"
+                >
+                  <X size={11} />
+                </button>
+              </div>
+
+              {/* Volume Slider with fine tuning */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                {project.backgroundMusic.volume === 0 ? <VolumeX size={12} color="#94a3b8" /> : <Volume2 size={12} color="#38bdf8" />}
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)', width: '68px' }}>
+                  Volume ({Math.round(project.backgroundMusic.volume * 100)}%) :
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.02}
+                  value={project.backgroundMusic.volume}
+                  onChange={(e) => handleUpdateMusicVolume(parseFloat(e.target.value))}
+                  style={{ width: '90px', accentColor: '#38bdf8', cursor: 'pointer' }}
+                  title="Réglez le volume de la musique (recommandé 10-20% pour ne pas masquer la voix)"
+                />
+              </div>
+
+              <span style={{ fontSize: '9px', color: '#10b981', marginLeft: 'auto' }}>
+                ✓ Mixage auto avec voix active
+              </span>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                Aucune musique de fond active.
+              </span>
+              <button
+                onClick={() => setChutierTab('audio')}
+                style={{
+                  background: 'rgba(56, 189, 248, 0.15)',
+                  border: '1px solid rgba(56, 189, 248, 0.35)',
+                  color: '#38bdf8',
+                  borderRadius: '4px',
+                  padding: '2px 8px',
+                  fontSize: '10px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <Plus size={10} />
+                <span>Choisir une musique dans le Chutier</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Saved Projects List Modal */}
+      {/* Saved Projects Modal */}
       {isProjectListModalOpen && (
         <div className="modal-overlay" onClick={() => setIsProjectListModalOpen(false)}>
-          <div className="glass-panel modal-content" style={{ maxWidth: '520px', padding: '16px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="glass-panel modal-content" style={{ maxWidth: '500px', padding: '16px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <FolderOpen size={18} color="#c084fc" />
-                <h3 className="modal-title" style={{ fontSize: '15px' }}>Projets de Montage Enregistrés</h3>
-              </div>
+              <h3 className="modal-title" style={{ fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <FolderOpen size={16} color="#c084fc" />
+                Mes Projets de Montage ({savedProjects.length})
+              </h3>
               <button className="close-btn" onClick={() => setIsProjectListModalOpen(false)}>
-                <X size={16} />
+                <X size={15} />
               </button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '280px', overflowY: 'auto' }}>
+            <div style={{ maxHeight: '300px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
               {savedProjects.map((p) => (
                 <div
                   key={p.id}
                   style={{
                     display: 'flex',
-                    alignItems: 'center',
                     justifyContent: 'space-between',
-                    padding: '8px 12px',
+                    alignItems: 'center',
+                    padding: '8px 10px',
                     backgroundColor: 'rgba(255,255,255,0.03)',
                     border: '1px solid var(--border-color)',
                     borderRadius: '6px'
                   }}
                 >
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <span style={{ fontSize: '13px', fontWeight: 600 }}>{p.title}</span>
-                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                      {p.clipCount} clips • {formatTime(p.totalDuration)} • {new Date(p.date).toLocaleDateString()}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600 }}>{p.title}</span>
+                    <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+                      {p.clipCount} clip(s) • ~{formatTime(p.totalDuration)} • {new Date(p.date).toLocaleDateString()}
                     </span>
                   </div>
 
@@ -1126,9 +1688,10 @@ export function VideoEditorStudio() {
                       Ouvrir
                     </button>
                     <button
-                      className="action-btn delete"
-                      style={{ padding: '3px 6px' }}
+                      className="btn-toolbar"
+                      style={{ padding: '3px 6px', color: '#fb7185' }}
                       onClick={() => handleDeleteSavedProject(p.id)}
+                      title="Supprimer ce projet"
                     >
                       <Trash2 size={12} />
                     </button>
@@ -1229,6 +1792,61 @@ export function VideoEditorStudio() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* GIF Export Modal */}
+      {gifModalVideo && (
+        <GifExportModal
+          video={gifModalVideo}
+          onClose={() => setGifModalVideo(null)}
+          onSavedToLibrary={loadLibraryAndProjects}
+        />
+      )}
+
+      {/* Device Frame Modal */}
+      {frameModalVideo && (
+        <DeviceFrameModal
+          video={frameModalVideo}
+          onClose={() => setFrameModalVideo(null)}
+          onSavedToLibrary={loadLibraryAndProjects}
+        />
+      )}
+
+      {/* Subtitles Studio Modal */}
+      {subtitlesModalVideo && (
+        <SubtitlesStudioModal
+          video={subtitlesModalVideo}
+          onClose={() => setSubtitlesModalVideo(null)}
+          onSavedToLibrary={loadLibraryAndProjects}
+        />
+      )}
+
+      {/* Voice Generator Modal */}
+      {isVoiceModalOpen && (
+        <VoiceGeneratorModal
+          onClose={() => setIsVoiceModalOpen(false)}
+          onGenerated={(title, blob) => {
+            const newAudio = {
+              id: `voice_${Date.now()}`,
+              title,
+              blob,
+              url: URL.createObjectURL(blob)
+            };
+            setCustomAudios(prev => [newAudio, ...prev]);
+            setProject(prev => ({
+              ...prev,
+              backgroundMusic: {
+                id: newAudio.id,
+                title: newAudio.title,
+                blob: newAudio.blob,
+                volume: 0.85, // Higher default volume for speech voiceovers
+                loop: false,
+                isPreset: false
+              }
+            }));
+            setIsVoiceModalOpen(false);
+          }}
+        />
       )}
     </div>
   );

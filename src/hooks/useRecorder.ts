@@ -16,8 +16,12 @@ export interface RecorderOptions {
   webcamMirrorMode?: boolean;
   webcamGlow?: boolean;
   showMouseClicks: boolean;
+  enableAutoZoom?: boolean;
+  autoZoomFactor?: number;
+  autoZoomDuration?: number;
   selectedMicId: string;
   selectedCamId: string;
+  captureSourcePreference?: 'screen' | 'window';
 }
 
 export type DrawTool = 'pen' | 'arrow' | 'rect' | 'highlighter';
@@ -49,6 +53,13 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
   const [countdown, setCountdown] = useState<number | null>(null);
   const countdownTimerRef = useRef<number | null>(null);
   const isPreviewingRef = useRef(false);
+  const isRecordingRef = useRef(false);
+  const isPausedRef = useRef(false);
+  const countdownRef = useRef<number | null>(null);
+
+  useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+  useEffect(() => { countdownRef.current = countdown; }, [countdown]);
 
   // Click Ripples active queue
   const ripplesRef = useRef<Array<{ id: number; x: number; y: number; startTime: number; button: string; duration: number }>>([]);
@@ -82,14 +93,30 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
   // Zoom & Spotlight states and refs
   const [isZoomed, setIsZoomed] = useState(false);
   const [isSpotlight, setIsSpotlight] = useState(false);
-  const [zoomFactor, setZoomFactorState] = useState(2.0);
+  const [zoomFactor, setZoomFactorState] = useState(options.autoZoomFactor || 2.0);
+  const [isAutoZoomEnabled, setIsAutoZoomEnabled] = useState(options.enableAutoZoom ?? false);
 
   const isZoomedRef = useRef(false);
   const isSpotlightRef = useRef(false);
-  const zoomFactorRef = useRef(2.0);
+  const zoomFactorRef = useRef(options.autoZoomFactor || 2.0);
   const currentZoomRef = useRef(1.0);
   const targetZoomCenterRef = useRef({ x: 0.5, y: 0.5 });
   const currentZoomCenterRef = useRef({ x: 0.5, y: 0.5 });
+  const isAutoZoomingRef = useRef(false);
+  const autoZoomTimeoutRef = useRef<number | null>(null);
+  const isAutoZoomEnabledRef = useRef(options.enableAutoZoom ?? false);
+
+  useEffect(() => {
+    isAutoZoomEnabledRef.current = options.enableAutoZoom ?? false;
+    setIsAutoZoomEnabled(options.enableAutoZoom ?? false);
+  }, [options.enableAutoZoom]);
+
+  useEffect(() => {
+    if (options.autoZoomFactor) {
+      zoomFactorRef.current = options.autoZoomFactor;
+      setZoomFactorState(options.autoZoomFactor);
+    }
+  }, [options.autoZoomFactor]);
 
   // Refs for media streams and elements
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -133,7 +160,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
 
     return {
       video: {
-        displaySurface: 'monitor',
+        displaySurface: options.captureSourcePreference === 'window' ? 'window' : 'monitor',
         width: { ideal: width },
         height: { ideal: height },
         frameRate: { ideal: options.frameRate }
@@ -146,7 +173,8 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       systemAudio: options.recordSystemAudio ? 'include' : 'exclude',
       selfBrowserSurface: 'exclude',
       surfaceSwitching: 'include',
-      preferCurrentTab: false
+      preferCurrentTab: false,
+      monitorTypeSurfaces: 'include'
     } as any;
   };
 
@@ -1018,32 +1046,63 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       // Start 3-second Countdown (giving time for Windows Camera OSD to display and vanish before recording)
       setCountdown(3);
       let count = 3;
+
+      // Broadcast countdown to full-screen transparent overlay
+      try {
+        import('@tauri-apps/api/event').then(({ emit }) => {
+          emit('countdown-tick', { count: 3 });
+        });
+        import('@tauri-apps/api/core').then(({ invoke }) => {
+          invoke('show_overlay');
+        });
+      } catch {}
       
       countdownTimerRef.current = window.setInterval(() => {
         count -= 1;
         if (count > 0) {
           setCountdown(count);
+          try {
+            import('@tauri-apps/api/event').then(({ emit }) => {
+              emit('countdown-tick', { count });
+            });
+          } catch {}
         } else {
           if (countdownTimerRef.current) {
             clearInterval(countdownTimerRef.current);
             countdownTimerRef.current = null;
           }
           setCountdown(null);
-          
-          try {
-            // Start recording chunks every 1 second
-            mediaRecorder.start(1000);
-            setIsRecording(true);
-            setIsPaused(false);
 
-            // Start Timer
-            timerIntervalRef.current = window.setInterval(() => {
-              setRecordingTime(prev => prev + 1);
-            }, 1000);
-          } catch (recErr) {
-            console.error('Failed to start MediaRecorder:', recErr);
-            stopAllStreams();
-          }
+          // 1. Immediately hide the overlay so it is NEVER captured in the video stream
+          try {
+            import('@tauri-apps/api/event').then(({ emit }) => {
+              emit('countdown-end', {});
+            });
+            if (!isDrawingModeRef.current) {
+              import('@tauri-apps/api/core').then(({ invoke }) => {
+                invoke('hide_overlay');
+              });
+            }
+          } catch {}
+
+          // 2. Wait 250ms for Windows Desktop Window Manager to completely flush the overlay from the screen buffer
+          setTimeout(() => {
+            try {
+              chunksRef.current = [];
+              // Start recording chunks every 1 second
+              mediaRecorder.start(1000);
+              setIsRecording(true);
+              setIsPaused(false);
+
+              // Start Timer
+              timerIntervalRef.current = window.setInterval(() => {
+                setRecordingTime(prev => prev + 1);
+              }, 1000);
+            } catch (recErr) {
+              console.error('Failed to start MediaRecorder:', recErr);
+              stopAllStreams();
+            }
+          }, 250);
         }
       }, 1000);
 
@@ -1093,9 +1152,21 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
 
   // Stop recording
   const stopRecording = () => {
+    const recordedDuration = recordingTime;
+
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
+
+    // Trigger cinema cut animation ("C'est dans la boîte !") on full-screen overlay
+    try {
+      import('@tauri-apps/api/event').then(({ emit }) => {
+        emit('recording-stopped-animation', { duration: recordedDuration });
+      });
+      import('@tauri-apps/api/core').then(({ invoke }) => {
+        invoke('show_overlay');
+      });
+    } catch {}
     
     if (workerRef.current) {
       workerRef.current.postMessage({ action: 'stop' });
@@ -1190,6 +1261,12 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
   };
 
   const toggleZoom = (targetX = 0.5, targetY = 0.5) => {
+    if (autoZoomTimeoutRef.current) {
+      clearTimeout(autoZoomTimeoutRef.current);
+      autoZoomTimeoutRef.current = null;
+    }
+    isAutoZoomingRef.current = false;
+
     if (!isZoomedRef.current) {
       // Zoom in centered on target cursor coordinates
       isZoomedRef.current = true;
@@ -1198,6 +1275,47 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     } else {
       // Zoom out back to full screen
       isZoomedRef.current = false;
+      setIsZoomed(false);
+    }
+  };
+
+  const triggerAutoZoom = (x: number, y: number) => {
+    if (!isAutoZoomEnabledRef.current) return;
+
+    const factor = options.autoZoomFactor || 1.75;
+    zoomFactorRef.current = factor;
+    setZoomFactorState(factor);
+
+    targetZoomCenterRef.current = { x, y };
+    isZoomedRef.current = true;
+    isAutoZoomingRef.current = true;
+    setIsZoomed(true);
+
+    if (autoZoomTimeoutRef.current) {
+      clearTimeout(autoZoomTimeoutRef.current);
+    }
+
+    const dur = (options.autoZoomDuration ?? 2.8) * 1000;
+    autoZoomTimeoutRef.current = window.setTimeout(() => {
+      if (isAutoZoomingRef.current) {
+        isZoomedRef.current = false;
+        isAutoZoomingRef.current = false;
+        setIsZoomed(false);
+      }
+    }, dur);
+  };
+
+  const toggleAutoZoom = () => {
+    const next = !isAutoZoomEnabledRef.current;
+    isAutoZoomEnabledRef.current = next;
+    setIsAutoZoomEnabled(next);
+    if (!next && isAutoZoomingRef.current) {
+      if (autoZoomTimeoutRef.current) {
+        clearTimeout(autoZoomTimeoutRef.current);
+        autoZoomTimeoutRef.current = null;
+      }
+      isZoomedRef.current = false;
+      isAutoZoomingRef.current = false;
       setIsZoomed(false);
     }
   };
@@ -1330,11 +1448,31 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     let unlistenClear: (() => void) | null = null;
     let unlistenAddBlur: (() => void) | null = null;
     let unlistenClearBlur: (() => void) | null = null;
+    let unlistenRecord: (() => void) | null = null;
+    let unlistenPause: (() => void) | null = null;
 
     async function setupTauriListener() {
       try {
         const { listen } = await import('@tauri-apps/api/event');
         
+        unlistenRecord = await listen('toggle-record', () => {
+          if (isRecordingRef.current || countdownRef.current !== null) {
+            stopRecording();
+          } else {
+            startRecording();
+          }
+        });
+
+        unlistenPause = await listen('toggle-pause', () => {
+          if (isRecordingRef.current) {
+            if (isPausedRef.current) {
+              resumeRecording();
+            } else {
+              pauseRecording();
+            }
+          }
+        });
+
         unlistenZoom = await listen<{ x: number; y: number }>('toggle-zoom', (event) => {
           if (event.payload && typeof event.payload.x === 'number' && typeof event.payload.y === 'number') {
             toggleZoom(event.payload.x, event.payload.y);
@@ -1346,6 +1484,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         unlistenClick = await listen<{ x: number; y: number; button: string }>('mouse-click', (event) => {
           if (event.payload && typeof event.payload.x === 'number' && typeof event.payload.y === 'number') {
             addClickRipple(event.payload.x, event.payload.y, event.payload.button || 'left');
+            triggerAutoZoom(event.payload.x, event.payload.y);
           }
         });
 
@@ -1360,8 +1499,13 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         });
 
         unlistenDrawPoint = await listen<{ x: number; y: number }>('draw-point', (event) => {
-          if (isDrawingModeRef.current && event.payload && typeof event.payload.x === 'number') {
-            updateDrawingStroke(event.payload.x, event.payload.y);
+          if (event.payload && typeof event.payload.x === 'number') {
+            if (isDrawingModeRef.current) {
+              updateDrawingStroke(event.payload.x, event.payload.y);
+            }
+            if (isAutoZoomingRef.current && isZoomedRef.current) {
+              targetZoomCenterRef.current = { x: event.payload.x, y: event.payload.y };
+            }
           }
         });
 
@@ -1401,20 +1545,38 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       if (unlistenClear) unlistenClear();
       if (unlistenAddBlur) unlistenAddBlur();
       if (unlistenClearBlur) unlistenClearBlur();
+      if (unlistenRecord) unlistenRecord();
+      if (unlistenPause) unlistenPause();
     };
   }, [options.showMouseClicks]);
 
-  // In-window Keyboard shortcut listener for Alt+Z, Alt+D, Alt+C, F9, or Z key
+  // In-window Keyboard shortcut listener for F6 (Record), F7 (Pause), Alt+Z, Alt+D, Alt+C, F9, or Z key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       
+      const isAltR = (e.altKey && e.key?.toLowerCase() === 'r') || e.code === 'F6';
+      const isAltP = (e.altKey && e.key?.toLowerCase() === 'p') || e.code === 'F7';
       const isAltZ = (e.altKey && e.key?.toLowerCase() === 'z') || e.code === 'F9';
       const isAltD = (e.altKey && e.key?.toLowerCase() === 'd') || e.code === 'F8';
       const isAltC = (e.altKey && e.key?.toLowerCase() === 'c') || e.code === 'F10';
       const isZ = e.key?.toLowerCase() === 'z' || e.code === 'KeyZ' || e.code === 'KeyW';
       
-      if (isAltD) {
+      if (isAltR) {
+        e.preventDefault();
+        if (isRecording || countdown !== null) {
+          stopRecording();
+        } else {
+          startRecording();
+        }
+      } else if (isAltP && isRecording) {
+        e.preventDefault();
+        if (isPaused) {
+          resumeRecording();
+        } else {
+          pauseRecording();
+        }
+      } else if (isAltD) {
         e.preventDefault();
         toggleDrawingMode();
       } else if (isAltC) {
@@ -1427,7 +1589,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isRecording]);
+  }, [isRecording, isPaused, countdown]);
 
   const cancelCountdown = () => {
     stopAllStreams();
@@ -1447,6 +1609,9 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     isZoomed,
     isSpotlight,
     zoomFactor,
+    isAutoZoomEnabled,
+    toggleAutoZoom,
+    triggerAutoZoom,
     toggleZoom,
     setZoomCenter,
     setZoomFactor,

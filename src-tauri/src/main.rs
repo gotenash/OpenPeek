@@ -1,3 +1,6 @@
+// Prevents additional console window on Windows, DO NOT REMOVE!!
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
@@ -113,10 +116,10 @@ fn toggle_overlay(app: tauri::AppHandle) {
 }
 
 fn main() {
-    // Disable WebView2 background suspension and occlusion tracking at the Chromium level
+    // Disable WebView2 background suspension and auto-select desktop screen capture to bypass prompt
     std::env::set_var(
         "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-        "--autoplay-policy=no-user-gesture-required --disable-features=CalculateWindowOcclusion --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding"
+        "--autoplay-policy=no-user-gesture-required --enable-usermedia-screen-capturing --auto-select-desktop-capture-source=\"Écran complet\" --auto-select-desktop-capture-source=\"Entire screen\" --auto-select-desktop-capture-source=\"Screen\" --use-fake-ui-for-media-stream --disable-features=CalculateWindowOcclusion --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding"
     );
 
     tauri::Builder::default()
@@ -128,6 +131,10 @@ fn main() {
                         if s.contains("F9") || (s.contains("Alt") && (s.contains("KeyZ") || s.contains('Z') || s.contains('z'))) {
                             let pos = get_system_cursor_position();
                             let _ = app.emit("toggle-zoom", pos);
+                        } else if s.contains("F6") || (s.contains("Alt") && (s.contains("KeyR") || s.contains('R') || s.contains('r'))) {
+                            let _ = app.emit("toggle-record", ());
+                        } else if s.contains("F7") || (s.contains("Alt") && (s.contains("KeyP") || s.contains('P') || s.contains('p'))) {
+                            let _ = app.emit("toggle-pause", ());
                         } else if s.contains("Alt") && (s.contains("KeyD") || s.contains('D') || s.contains('d')) {
                             let _ = app.emit("toggle-draw", ());
                             if let Some(overlay) = app.get_webview_window("overlay") {
@@ -154,6 +161,18 @@ fn main() {
             if let Ok(f9) = "F9".parse::<Shortcut>() {
                 let _ = app.global_shortcut().register(f9);
             }
+            if let Ok(alt_r) = "Alt+R".parse::<Shortcut>() {
+                let _ = app.global_shortcut().register(alt_r);
+            }
+            if let Ok(f6) = "F6".parse::<Shortcut>() {
+                let _ = app.global_shortcut().register(f6);
+            }
+            if let Ok(alt_p) = "Alt+P".parse::<Shortcut>() {
+                let _ = app.global_shortcut().register(alt_p);
+            }
+            if let Ok(f7) = "F7".parse::<Shortcut>() {
+                let _ = app.global_shortcut().register(f7);
+            }
             if let Ok(alt_d) = "Alt+D".parse::<Shortcut>() {
                 let _ = app.global_shortcut().register(alt_d);
             }
@@ -167,6 +186,8 @@ fn main() {
                 let mut prev_left = false;
                 let mut prev_right = false;
                 let mut prev_zoom_key = false;
+                let mut prev_record_key = false;
+                let mut prev_pause_key = false;
                 let mut prev_draw_key = false;
                 let mut prev_clear_key = false;
 
@@ -174,16 +195,34 @@ fn main() {
                     #[cfg(windows)]
                     {
                         use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-                            GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON, VK_MENU, VK_F8, VK_F9, VK_F10
+                            GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON, VK_MENU, VK_F6, VK_F7, VK_F8, VK_F9, VK_F10
                         };
 
                         let alt_down = unsafe { (GetAsyncKeyState(VK_MENU as i32) as u16 & 0x8000) != 0 };
                         let z_down = unsafe { (GetAsyncKeyState(b'Z' as i32) as u16 & 0x8000) != 0 };
+                        let r_down = unsafe { (GetAsyncKeyState(b'R' as i32) as u16 & 0x8000) != 0 };
+                        let p_down = unsafe { (GetAsyncKeyState(b'P' as i32) as u16 & 0x8000) != 0 };
                         let d_down = unsafe { (GetAsyncKeyState(b'D' as i32) as u16 & 0x8000) != 0 };
                         let c_down = unsafe { (GetAsyncKeyState(b'C' as i32) as u16 & 0x8000) != 0 };
+                        let f6_down = unsafe { (GetAsyncKeyState(VK_F6 as i32) as u16 & 0x8000) != 0 };
+                        let f7_down = unsafe { (GetAsyncKeyState(VK_F7 as i32) as u16 & 0x8000) != 0 };
                         let f8_down = unsafe { (GetAsyncKeyState(VK_F8 as i32) as u16 & 0x8000) != 0 };
                         let f9_down = unsafe { (GetAsyncKeyState(VK_F9 as i32) as u16 & 0x8000) != 0 };
                         let f10_down = unsafe { (GetAsyncKeyState(VK_F10 as i32) as u16 & 0x8000) != 0 };
+
+                        // Record Start/Stop hotkey (Alt+R or F6)
+                        let record_pressed = (alt_down && r_down) || f6_down;
+                        if record_pressed && !prev_record_key {
+                            let _ = app_handle.emit("toggle-record", ());
+                        }
+                        prev_record_key = record_pressed;
+
+                        // Pause/Resume hotkey (Alt+P or F7)
+                        let pause_pressed = (alt_down && p_down) || f7_down;
+                        if pause_pressed && !prev_pause_key {
+                            let _ = app_handle.emit("toggle-pause", ());
+                        }
+                        prev_pause_key = pause_pressed;
 
                         // Zoom hotkey (Alt+Z or F9)
                         let zoom_pressed = (alt_down && z_down) || f9_down;
@@ -252,6 +291,17 @@ fn main() {
             });
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                match event {
+                    tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+                        window.app_handle().exit(0);
+                        std::process::exit(0);
+                    }
+                    _ => {}
+                }
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

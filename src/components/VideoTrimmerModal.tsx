@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { type SavedVideo, saveRecording } from '../utils/db';
-import { X, Scissors, Play, Pause, RotateCcw, Check, Download, Sparkles } from 'lucide-react';
+import { X, Scissors, Play, Pause, RotateCcw, Check, Download, Sparkles, Layers, Type } from 'lucide-react';
+import { GifExportModal } from './GifExportModal';
+import { DeviceFrameModal } from './DeviceFrameModal';
+import { SubtitlesStudioModal } from './SubtitlesStudioModal';
 
 interface VideoTrimmerModalProps {
   video: SavedVideo;
@@ -17,6 +20,9 @@ export function VideoTrimmerModal({ video, onClose, onTrimComplete }: VideoTrimm
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [trimmedBlob, setTrimmedBlob] = useState<Blob | null>(null);
+  const [showGifModal, setShowGifModal] = useState(false);
+  const [showFrameModal, setShowFrameModal] = useState(false);
+  const [showSubtitlesModal, setShowSubtitlesModal] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoUrlRef = useRef<string>(URL.createObjectURL(video.blob));
@@ -426,6 +432,36 @@ export function VideoTrimmerModal({ video, onClose, onTrimComplete }: VideoTrimm
           </button>
 
           <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              className="btn-secondary"
+              onClick={() => setShowSubtitlesModal(true)}
+              disabled={isProcessing}
+              style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', color: '#fde047', borderColor: 'rgba(253, 224, 71, 0.4)' }}
+            >
+              <Type size={14} />
+              <span>Sous-titres</span>
+            </button>
+
+            <button
+              className="btn-secondary"
+              onClick={() => setShowFrameModal(true)}
+              disabled={isProcessing}
+              style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.4)' }}
+            >
+              <Layers size={14} />
+              <span>Habillage & Cadre</span>
+            </button>
+
+            <button
+              className="btn-secondary"
+              onClick={() => setShowGifModal(true)}
+              disabled={isProcessing}
+              style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', color: '#c084fc', borderColor: 'rgba(192, 132, 252, 0.4)' }}
+            >
+              <Sparkles size={14} />
+              <span>Exporter en GIF</span>
+            </button>
+
             {trimmedBlob && (
               <button className="btn-secondary" onClick={handleDownloadTrimmed} style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <Download size={14} />
@@ -445,6 +481,36 @@ export function VideoTrimmerModal({ video, onClose, onTrimComplete }: VideoTrimm
           </div>
         </div>
       </div>
+
+      {showGifModal && (
+        <GifExportModal
+          video={video}
+          onClose={() => setShowGifModal(false)}
+          onSavedToLibrary={() => {
+            onTrimComplete();
+          }}
+        />
+      )}
+
+      {showFrameModal && (
+        <DeviceFrameModal
+          video={video}
+          onClose={() => setShowFrameModal(false)}
+          onSavedToLibrary={() => {
+            onTrimComplete();
+          }}
+        />
+      )}
+
+      {showSubtitlesModal && (
+        <SubtitlesStudioModal
+          video={video}
+          onClose={() => setShowSubtitlesModal(false)}
+          onSavedToLibrary={() => {
+            onTrimComplete();
+          }}
+        />
+      )}
     </div>
   );
 }

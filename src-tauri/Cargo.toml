@@ -1,6 +1,6 @@
 [package]
-name = "capt-screen"
-version = "0.1.0"
+name = "openpeek"
+version = "1.0.0"
 edition = "2021"
 
 [dependencies]

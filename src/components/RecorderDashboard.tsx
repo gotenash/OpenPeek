@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import type { RecorderOptions } from '../hooks/useRecorder';
+import { useI18n } from '../i18n/I18nContext';
 import { 
   Play, 
   Pause, 
@@ -28,6 +29,7 @@ interface RecorderDashboardProps {
 }
 
 export function RecorderDashboard({ options, setOptions, recorder }: RecorderDashboardProps) {
+  const { t } = useI18n();
   const {
     isRecording,
     isPaused,
@@ -41,6 +43,8 @@ export function RecorderDashboard({ options, setOptions, recorder }: RecorderDas
     isZoomed,
     isSpotlight,
     zoomFactor,
+    isAutoZoomEnabled,
+    toggleAutoZoom,
     toggleZoom,
     setZoomCenter,
     setZoomFactor,
@@ -442,8 +446,22 @@ export function RecorderDashboard({ options, setOptions, recorder }: RecorderDas
                 <span className="shortcut-badge">Alt + Z / F9</span>
               </button>
 
+              <button
+                className={`btn-toolbar ${isAutoZoomEnabled ? 'active' : ''}`}
+                onClick={() => {
+                  toggleAutoZoom();
+                  setOptions(prev => ({ ...prev, enableAutoZoom: !isAutoZoomEnabled }));
+                }}
+                title="Activer/Désactiver l'Auto-Zoom cinématique intelligent au clic"
+                style={isAutoZoomEnabled ? { backgroundColor: 'rgba(139, 92, 246, 0.25)', borderColor: '#8b5cf6', color: '#c084fc' } : {}}
+              >
+                <Sparkles size={16} />
+                <span>Auto-Zoom {isAutoZoomEnabled ? 'Actif' : ''}</span>
+                <span className="shortcut-badge" style={{ backgroundColor: isAutoZoomEnabled ? 'rgba(139, 92, 246, 0.4)' : '' }}>Auto</span>
+              </button>
+
               <div className="zoom-factor-group">
-                {[1.5, 2.0, 2.5].map((factor) => (
+                {[1.5, 1.75, 2.0, 2.5].map((factor) => (
                   <button
                     key={factor}
                     className={`btn-factor ${zoomFactor === factor ? 'selected' : ''}`}
@@ -590,7 +608,41 @@ export function RecorderDashboard({ options, setOptions, recorder }: RecorderDas
             )}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              className="btn-toolbar"
+              onClick={() => {
+                recorder.addBlurMask({
+                  id: Math.random(),
+                  x: 0,
+                  y: 0.94,
+                  width: 1.0,
+                  height: 0.06
+                });
+              }}
+              title="Masquer la barre des tâches Windows (horloge & icônes)"
+              style={{ fontSize: '11px', padding: '3px 8px' }}
+            >
+              <span>+ Barre des tâches</span>
+            </button>
+
+            <button
+              className="btn-toolbar"
+              onClick={() => {
+                recorder.addBlurMask({
+                  id: Math.random(),
+                  x: 0,
+                  y: 0,
+                  width: 1.0,
+                  height: 0.08
+                });
+              }}
+              title="Masquer la barre d'URL et les onglets du navigateur"
+              style={{ fontSize: '11px', padding: '3px 8px' }}
+            >
+              <span>+ Barre d'URL</span>
+            </button>
+
             <button
               className="btn-toolbar"
               onClick={() => {
@@ -602,11 +654,11 @@ export function RecorderDashboard({ options, setOptions, recorder }: RecorderDas
                   height: 0.25
                 });
               }}
-              title="Poser un rectangle de flou permanent sur l'écran"
-              style={{ fontSize: '12px' }}
+              title="Poser un rectangle de flou permanent au centre de l'écran"
+              style={{ fontSize: '11px', padding: '3px 8px', color: '#c084fc' }}
             >
-              <ShieldAlert size={14} />
-              <span>+ Ajouter zone floue</span>
+              <ShieldAlert size={13} />
+              <span>+ Zone Centre</span>
             </button>
 
             {recorder.blurMasks && recorder.blurMasks.length > 0 && (
@@ -614,10 +666,10 @@ export function RecorderDashboard({ options, setOptions, recorder }: RecorderDas
                 className="btn-toolbar"
                 onClick={recorder.clearBlurMasks}
                 title="Supprimer tous les flous de confidentialité"
-                style={{ color: '#fb7185', fontSize: '12px' }}
+                style={{ color: '#fb7185', fontSize: '11px', padding: '3px 8px' }}
               >
-                <Trash2 size={14} />
-                <span>Effacer flous</span>
+                <Trash2 size={13} />
+                <span>Effacer flous ({recorder.blurMasks.length})</span>
               </button>
             )}
           </div>
@@ -630,22 +682,22 @@ export function RecorderDashboard({ options, setOptions, recorder }: RecorderDas
         
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 className="deck-title">
-            Tableau de Bord
+            {t('dashboard.sources')}
           </h2>
           {countdown !== null ? (
             <span className="status-pill recording" style={{ animation: 'pulse-red 1s infinite ease-in-out' }}>
-              Décompte...
+              {t('dashboard.countdownStarting')}...
             </span>
           ) : isRecording ? (
             <span className={`status-pill ${isPaused ? 'paused' : 'recording'}`}>
-              {isPaused ? 'En Pause' : 'Enregistrement'}
+              {isPaused ? t('dashboard.paused') : t('dashboard.recording')}
             </span>
           ) : isPreviewing ? (
             <span className="status-pill ready" style={{ backgroundColor: 'rgba(6, 182, 212, 0.2)', color: '#38bdf8', borderColor: '#06b6d4' }}>
-              Aperçu Cadrage
+              {t('dashboard.previewOn')}
             </span>
           ) : (
-            <span className="status-pill ready">Prêt</span>
+            <span className="status-pill ready">{t('dashboard.ready')}</span>
           )}
         </div>
 
@@ -655,28 +707,39 @@ export function RecorderDashboard({ options, setOptions, recorder }: RecorderDas
             <div className="source-card-icon">
               <Mic size={20} />
             </div>
-            <div className="source-card-title">Microphone</div>
+            <div className="source-card-title">{t('dashboard.recordMic')}</div>
           </div>
 
           <div className={`source-card ${options.recordSystemAudio ? 'selected' : ''}`} onClick={() => !isRecording && countdown === null && setOptions(prev => ({ ...prev, recordSystemAudio: !prev.recordSystemAudio }))}>
             <div className="source-card-icon">
               <Volume2 size={20} />
             </div>
-            <div className="source-card-title">Son Bureau</div>
+            <div className="source-card-title">{t('dashboard.recordSystem')}</div>
           </div>
 
           <div className={`source-card ${options.showWebcam ? 'selected' : ''}`} onClick={() => !isRecording && countdown === null && setOptions(prev => ({ ...prev, showWebcam: !prev.showWebcam }))}>
             <div className="source-card-icon">
               <Video size={20} />
             </div>
-            <div className="source-card-title">Incrustation Cam</div>
+            <div className="source-card-title">{t('dashboard.webcam')}</div>
           </div>
 
           <div className={`source-card ${options.showMouseClicks ? 'selected' : ''}`} onClick={() => !isRecording && countdown === null && setOptions(prev => ({ ...prev, showMouseClicks: !prev.showMouseClicks }))}>
             <div className="source-card-icon">
               <MousePointer size={20} />
             </div>
-            <div className="source-card-title">Effets de Clics</div>
+            <div className="source-card-title">{t('dashboard.clicks')}</div>
+          </div>
+
+          <div className={`source-card ${options.enableAutoZoom ? 'selected' : ''}`} onClick={() => {
+            if (!isRecording && countdown === null) {
+              setOptions(prev => ({ ...prev, enableAutoZoom: !prev.enableAutoZoom }));
+            }
+          }} title={t('settings.video.autoZoomHelp')}>
+            <div className="source-card-icon">
+              <Sparkles size={20} />
+            </div>
+            <div className="source-card-title">{t('dashboard.autoZoom')}</div>
           </div>
         </div>
 
@@ -693,11 +756,11 @@ export function RecorderDashboard({ options, setOptions, recorder }: RecorderDas
             </div>
           ) : !isRecording ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-              <button className="rec-btn" onClick={startRecording} title="Démarrer l'enregistrement">
+              <button className="rec-btn" onClick={startRecording} title={t('dashboard.startBtn')}>
                 <div style={{ width: '26px', height: '26px', borderRadius: '50%', backgroundColor: 'white', boxShadow: '0 0 8px rgba(255,255,255,0.7)' }} />
               </button>
               <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent)', letterSpacing: '1.5px', textTransform: 'uppercase', textShadow: '0 0 8px var(--accent-glow)' }}>
-                Enregistrer (REC)
+                {t('dashboard.startBtn')}
               </span>
 
               <button
@@ -717,7 +780,7 @@ export function RecorderDashboard({ options, setOptions, recorder }: RecorderDas
                 title="Affiche l'écran en direct pour cadrer et positionner les zones de flou sans enregistrer"
               >
                 {isPreviewing ? <EyeOff size={13} /> : <Eye size={13} />}
-                <span>{isPreviewing ? "Arrêter l'aperçu" : "Aperçu de l'écran (Cadrage)"}</span>
+                <span>{isPreviewing ? t('dashboard.previewOff') : t('dashboard.previewOn')}</span>
               </button>
             </div>
           ) : (
