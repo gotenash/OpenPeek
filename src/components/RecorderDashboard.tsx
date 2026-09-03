@@ -19,7 +19,9 @@ import {
   Trash2,
   Sparkles,
   Eye,
-  EyeOff
+  EyeOff,
+  Wand2,
+  Keyboard
 } from 'lucide-react';
 
 interface RecorderDashboardProps {
@@ -740,6 +742,28 @@ export function RecorderDashboard({ options, setOptions, recorder }: RecorderDas
               <Sparkles size={20} />
             </div>
             <div className="source-card-title">{t('dashboard.autoZoom')}</div>
+          </div>
+
+          <div className={`source-card ${options.enableCinematicCursor !== false ? 'selected' : ''}`} onClick={() => {
+            if (!isRecording && countdown === null) {
+              setOptions(prev => ({ ...prev, enableCinematicCursor: prev.enableCinematicCursor === false }));
+            }
+          }} title={t('settings.video.cinematicCursorHelp')}>
+            <div className="source-card-icon">
+              <Wand2 size={20} />
+            </div>
+            <div className="source-card-title">{t('dashboard.smoothCursor')}</div>
+          </div>
+
+          <div className={`source-card ${options.enableKeystrokeHUD !== false ? 'selected' : ''}`} onClick={() => {
+            if (!isRecording && countdown === null) {
+              setOptions(prev => ({ ...prev, enableKeystrokeHUD: prev.enableKeystrokeHUD === false }));
+            }
+          }} title={t('settings.keystrokeHUD.enableHelp')}>
+            <div className="source-card-icon">
+              <Keyboard size={20} />
+            </div>
+            <div className="source-card-title">{t('dashboard.keystrokes')}</div>
           </div>
         </div>
 

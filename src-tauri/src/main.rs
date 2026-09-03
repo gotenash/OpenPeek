@@ -56,6 +56,24 @@ struct ClickEvent {
     button: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+struct KeystrokeEvent {
+    combo: String,
+    key: String,
+    modifiers: Vec<String>,
+}
+
+fn is_openpeek_internal_shortcut(combo: &str) -> bool {
+    matches!(
+        combo,
+        "Alt + R" | "F6" |
+        "Alt + P" | "F7" |
+        "Alt + Z" | "F9" |
+        "Alt + D" | "F8" |
+        "Alt + C" | "F10"
+    )
+}
+
 #[cfg(not(windows))]
 fn get_system_cursor_position() -> CursorCoordinates {
     CursorCoordinates { x: 0.5, y: 0.5 }
@@ -90,8 +108,18 @@ fn position_overlay_to_active_monitor(overlay: &tauri::WebviewWindow) {
 fn show_overlay(app: tauri::AppHandle) {
     if let Some(overlay) = app.get_webview_window("overlay") {
         position_overlay_to_active_monitor(&overlay);
+        let _ = overlay.set_ignore_cursor_events(false);
         let _ = overlay.show();
         let _ = overlay.set_focus();
+    }
+}
+
+#[tauri::command]
+fn show_overlay_hud(app: tauri::AppHandle) {
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        position_overlay_to_active_monitor(&overlay);
+        let _ = overlay.set_ignore_cursor_events(true);
+        let _ = overlay.show();
     }
 }
 
@@ -153,8 +181,12 @@ fn main() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![show_overlay, hide_overlay, toggle_overlay])
+        .invoke_handler(tauri::generate_handler![show_overlay, hide_overlay, toggle_overlay, show_overlay_hud])
         .setup(|app| {
+            if let Some(main_window) = app.get_webview_window("main") {
+                let _ = main_window.maximize();
+            }
+
             if let Ok(alt_z) = "Alt+Z".parse::<Shortcut>() {
                 let _ = app.global_shortcut().register(alt_z);
             }
@@ -190,12 +222,24 @@ fn main() {
                 let mut prev_pause_key = false;
                 let mut prev_draw_key = false;
                 let mut prev_clear_key = false;
+                let mut prev_esc_key = false;
+                let mut prev_cursor_pos = CursorCoordinates { x: -1.0, y: -1.0 };
+                let mut prev_keys = [false; 256];
 
                 loop {
                     #[cfg(windows)]
                     {
+                        // 1. Continuous smooth cursor tracking (~120Hz)
+                        let current_cursor = get_system_cursor_position();
+                        if (current_cursor.x - prev_cursor_pos.x).abs() > 0.0003 || (current_cursor.y - prev_cursor_pos.y).abs() > 0.0003 {
+                            let _ = app_handle.emit("cursor-move", current_cursor.clone());
+                            prev_cursor_pos = current_cursor;
+                        }
                         use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-                            GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON, VK_MENU, VK_F6, VK_F7, VK_F8, VK_F9, VK_F10
+                            GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON, VK_MENU, VK_CONTROL, VK_SHIFT,
+                            VK_LWIN, VK_RWIN, VK_RETURN, VK_ESCAPE, VK_TAB, VK_SPACE, VK_BACK,
+                            VK_DELETE, VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN,
+                            VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12
                         };
 
                         let alt_down = unsafe { (GetAsyncKeyState(VK_MENU as i32) as u16 & 0x8000) != 0 };
@@ -239,6 +283,8 @@ fn main() {
                             if let Some(overlay) = app_handle.get_webview_window("overlay") {
                                 if overlay.is_visible().unwrap_or(false) {
                                     let _ = overlay.hide();
+                                    let _ = app_handle.emit("set-drawing-mode", serde_json::json!({ "active": false }));
+                                    let _ = app_handle.emit("unfreeze-snapshot", ());
                                 } else {
                                     position_overlay_to_active_monitor(&overlay);
                                     let _ = overlay.show();
@@ -247,6 +293,20 @@ fn main() {
                             }
                         }
                         prev_draw_key = draw_pressed;
+
+                        // Escape hotkey: always exit drawing mode and unfreeze screen
+                        let esc_down = unsafe { (GetAsyncKeyState(VK_ESCAPE as i32) as u16 & 0x8000) != 0 };
+                        if esc_down && !prev_esc_key {
+                            if let Some(overlay) = app_handle.get_webview_window("overlay") {
+                                if overlay.is_visible().unwrap_or(false) {
+                                    let _ = overlay.hide();
+                                    let _ = app_handle.emit("exit-draw", ());
+                                    let _ = app_handle.emit("set-drawing-mode", serde_json::json!({ "active": false }));
+                                    let _ = app_handle.emit("unfreeze-snapshot", ());
+                                }
+                            }
+                        }
+                        prev_esc_key = esc_down;
 
                         // Clear drawings hotkey (Alt+C or F10)
                         let clear_pressed = (alt_down && c_down) || f10_down;
@@ -285,6 +345,115 @@ fn main() {
 
                         prev_left = left_down;
                         prev_right = right_down;
+
+                        // 2. Global Keystroke Visualizer Scanner
+                        let ctrl_down = unsafe { (GetAsyncKeyState(VK_CONTROL as i32) as u16 & 0x8000) != 0 };
+                        let shift_down = unsafe { (GetAsyncKeyState(VK_SHIFT as i32) as u16 & 0x8000) != 0 };
+                        let win_down = unsafe {
+                            ((GetAsyncKeyState(VK_LWIN as i32) as u16 & 0x8000) != 0) ||
+                            ((GetAsyncKeyState(VK_RWIN as i32) as u16 & 0x8000) != 0)
+                        };
+
+                        let has_modifier = ctrl_down || alt_down || win_down;
+
+                        // Letters A-Z
+                        for vk in 0x41u32..=0x5Au32 {
+                            let is_down = unsafe { (GetAsyncKeyState(vk as i32) as u16 & 0x8000) != 0 };
+                            let prev = prev_keys[vk as usize];
+                            if is_down && !prev && (has_modifier || shift_down) {
+                                let key_char = (vk as u8 as char).to_string();
+                                let mut mods = Vec::new();
+                                if ctrl_down { mods.push("Ctrl".to_string()); }
+                                if alt_down { mods.push("Alt".to_string()); }
+                                if shift_down { mods.push("Shift".to_string()); }
+                                if win_down { mods.push("Win".to_string()); }
+                                let mut combo_parts = mods.clone();
+                                combo_parts.push(key_char.clone());
+                                let combo = combo_parts.join(" + ");
+                                if !is_openpeek_internal_shortcut(&combo) {
+                                    let _ = app_handle.emit("keystroke", KeystrokeEvent {
+                                        combo,
+                                        key: key_char,
+                                        modifiers: mods,
+                                    });
+                                }
+                            }
+                            prev_keys[vk as usize] = is_down;
+                        }
+
+                        // Numbers 0-9
+                        for vk in 0x30u32..=0x39u32 {
+                            let is_down = unsafe { (GetAsyncKeyState(vk as i32) as u16 & 0x8000) != 0 };
+                            let prev = prev_keys[vk as usize];
+                            if is_down && !prev && (has_modifier || shift_down) {
+                                let key_char = (vk as u8 as char).to_string();
+                                let mut mods = Vec::new();
+                                if ctrl_down { mods.push("Ctrl".to_string()); }
+                                if alt_down { mods.push("Alt".to_string()); }
+                                if shift_down { mods.push("Shift".to_string()); }
+                                if win_down { mods.push("Win".to_string()); }
+                                let mut combo_parts = mods.clone();
+                                combo_parts.push(key_char.clone());
+                                let combo = combo_parts.join(" + ");
+                                if !is_openpeek_internal_shortcut(&combo) {
+                                    let _ = app_handle.emit("keystroke", KeystrokeEvent {
+                                        combo,
+                                        key: key_char,
+                                        modifiers: mods,
+                                    });
+                                }
+                            }
+                            prev_keys[vk as usize] = is_down;
+                        }
+
+                        // Action / Navigation Keys
+                        const ACTION_KEYS: &[(u16, &str)] = &[
+                            (VK_RETURN, "Entrée"),
+                            (VK_ESCAPE, "Échap"),
+                            (VK_TAB, "Tab"),
+                            (VK_SPACE, "Espace"),
+                            (VK_BACK, "Retour"),
+                            (VK_DELETE, "Suppr"),
+                            (VK_LEFT, "←"),
+                            (VK_UP, "↑"),
+                            (VK_RIGHT, "→"),
+                            (VK_DOWN, "↓"),
+                            (VK_F1, "F1"),
+                            (VK_F2, "F2"),
+                            (VK_F3, "F3"),
+                            (VK_F4, "F4"),
+                            (VK_F5, "F5"),
+                            (VK_F6, "F6"),
+                            (VK_F7, "F7"),
+                            (VK_F8, "F8"),
+                            (VK_F9, "F9"),
+                            (VK_F10, "F10"),
+                            (VK_F11, "F11"),
+                            (VK_F12, "F12"),
+                        ];
+
+                        for &(vk, label) in ACTION_KEYS {
+                            let is_down = unsafe { (GetAsyncKeyState(vk as i32) as u16 & 0x8000) != 0 };
+                            let prev = prev_keys[vk as usize];
+                            if is_down && !prev {
+                                let mut mods = Vec::new();
+                                if ctrl_down { mods.push("Ctrl".to_string()); }
+                                if alt_down { mods.push("Alt".to_string()); }
+                                if shift_down { mods.push("Shift".to_string()); }
+                                if win_down { mods.push("Win".to_string()); }
+                                let mut combo_parts = mods.clone();
+                                combo_parts.push(label.to_string());
+                                let combo = combo_parts.join(" + ");
+                                if !is_openpeek_internal_shortcut(&combo) {
+                                    let _ = app_handle.emit("keystroke", KeystrokeEvent {
+                                        combo,
+                                        key: label.to_string(),
+                                        modifiers: mods,
+                                    });
+                                }
+                            }
+                            prev_keys[vk as usize] = is_down;
+                        }
                     }
                     std::thread::sleep(std::time::Duration::from_millis(8));
                 }

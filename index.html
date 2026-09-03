@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <title>OpenPeek - Modern Screen Recorder & Studio</title>
+    <script>
+      if (window.location.hash.includes('overlay') || window.location.search.includes('overlay')) {
+        document.documentElement.classList.add('overlay-mode');
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

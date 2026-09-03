@@ -97,6 +97,8 @@ export function DrawingCanvas() {
     }
   }, [color, thickness, tool]);
 
+  const pointsRef = useRef<Array<{ x: number; y: number }>>([]);
+
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     const ctx = contextRef.current;
@@ -106,8 +108,7 @@ export function DrawingCanvas() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    ctx.beginPath();
-    ctx.moveTo(x, y);
+    pointsRef.current = [{ x, y }];
     setIsDrawing(true);
   };
 
@@ -118,19 +119,55 @@ export function DrawingCanvas() {
     if (!canvas || !ctx) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const rawX = e.clientX - rect.left;
+    const rawY = e.clientY - rect.top;
 
-    ctx.lineTo(x, y);
-    ctx.stroke();
+    const pts = pointsRef.current;
+    const prev = pts[pts.length - 1];
+
+    // Jitter deadzone
+    const dx = rawX - prev.x;
+    const dy = rawY - prev.y;
+    if (dx * dx + dy * dy < 4) return;
+
+    // Moving average smoothing
+    const x = prev.x + dx * 0.75;
+    const y = prev.y + dy * 0.75;
+    pts.push({ x, y });
+
+    if (pts.length === 2) {
+      ctx.beginPath();
+      ctx.moveTo(prev.x, prev.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    } else if (pts.length > 2) {
+      const pPrev = pts[pts.length - 2];
+      const pPrevPrev = pts[pts.length - 3];
+      const mid1X = (pPrevPrev.x + pPrev.x) / 2;
+      const mid1Y = (pPrevPrev.y + pPrev.y) / 2;
+      const mid2X = (pPrev.x + x) / 2;
+      const mid2Y = (pPrev.y + y) / 2;
+
+      ctx.beginPath();
+      ctx.moveTo(mid1X, mid1Y);
+      ctx.quadraticCurveTo(pPrev.x, pPrev.y, mid2X, mid2Y);
+      ctx.stroke();
+    }
   };
 
   const stopDrawing = () => {
     if (!isDrawing) return;
     const ctx = contextRef.current;
-    if (ctx) {
-      ctx.closePath();
+    const pts = pointsRef.current;
+    if (ctx && pts.length > 1) {
+      const last = pts[pts.length - 1];
+      const prev = pts[pts.length - 2];
+      ctx.beginPath();
+      ctx.moveTo((prev.x + last.x) / 2, (prev.y + last.y) / 2);
+      ctx.lineTo(last.x, last.y);
+      ctx.stroke();
     }
+    pointsRef.current = [];
     setIsDrawing(false);
   };
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Pencil, ArrowUpRight, Square, Highlighter, Trash2, X, Sparkles } from 'lucide-react';
+import { Pencil, ArrowUpRight, Square, Highlighter, Trash2, X, Sparkles, ZoomIn, Maximize2 } from 'lucide-react';
 import type { DrawTool } from '../hooks/useRecorder';
 import { useI18n } from '../i18n/I18nContext';
 
@@ -8,9 +8,17 @@ export function OverlayCanvas() {
   const [tool, setTool] = useState<DrawTool>('pen');
   const [color, setColor] = useState('#f43f5e');
   const [isAutoFade, setIsAutoFade] = useState(true);
+  const [isSmoothing, setIsSmoothing] = useState(true);
+  const [isDrawingActive, setIsDrawingActive] = useState(false);
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
   const [countdownValue, setCountdownValue] = useState<number | null>(null);
   const [cutAnimation, setCutAnimation] = useState<{ active: boolean; duration: number } | null>(null);
+  const [zoomToast, setZoomToast] = useState<{ zoomed: boolean; factor: number } | null>(null);
+  const [keystrokeToast, setKeystrokeToast] = useState<string | null>(null);
+  const [isZoomCornerActive, setIsZoomCornerActive] = useState(false);
+  const [activeZoomFactor, setActiveZoomFactor] = useState(2.0);
+  const zoomToastTimeoutRef = useRef<any>(null);
+  const keystrokeToastTimeoutRef = useRef<any>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawingRef = useRef(false);
@@ -22,9 +30,14 @@ export function OverlayCanvas() {
   useEffect(() => {
     let unlistenFreeze: (() => void) | null = null;
     let unlistenUnfreeze: (() => void) | null = null;
+    let unlistenExit: (() => void) | null = null;
+    let unlistenDrawingMode: (() => void) | null = null;
     let unlistenTick: (() => void) | null = null;
     let unlistenEnd: (() => void) | null = null;
     let unlistenCut: (() => void) | null = null;
+    let unlistenZoomHud: (() => void) | null = null;
+    let unlistenKeystrokeHud: (() => void) | null = null;
+    let unlistenClear: (() => void) | null = null;
 
     async function setupListeners() {
       try {
@@ -32,10 +45,31 @@ export function OverlayCanvas() {
         unlistenFreeze = await listen<{ image: string }>('freeze-snapshot', (event) => {
           if (event.payload?.image) {
             setSnapshotUrl(event.payload.image);
+            setIsDrawingActive(true);
           }
         });
         unlistenUnfreeze = await listen('unfreeze-snapshot', () => {
           setSnapshotUrl(null);
+          setIsDrawingActive(false);
+        });
+        unlistenExit = await listen('exit-draw', () => {
+          setSnapshotUrl(null);
+          setIsDrawingActive(false);
+          strokesRef.current = [];
+          currentStrokeRef.current = null;
+        });
+        unlistenDrawingMode = await listen<{ active: boolean }>('set-drawing-mode', (event) => {
+          const active = !!event.payload?.active;
+          setIsDrawingActive(active);
+          if (!active) {
+            setSnapshotUrl(null);
+            strokesRef.current = [];
+            currentStrokeRef.current = null;
+          }
+        });
+        unlistenClear = await listen('clear-drawings', () => {
+          strokesRef.current = [];
+          currentStrokeRef.current = null;
         });
         unlistenTick = await listen<{ count: number }>('countdown-tick', (event) => {
           if (typeof event.payload?.count === 'number') {
@@ -45,17 +79,93 @@ export function OverlayCanvas() {
         unlistenEnd = await listen('countdown-end', () => {
           setCountdownValue(null);
         });
-        unlistenCut = await listen<{ duration: number }>('recording-stopped-animation', (event) => {
-          setCountdownValue(null);
-          setCutAnimation({ active: true, duration: event.payload?.duration || 0 });
-          setTimeout(async () => {
-            setCutAnimation(null);
-            if (!strokesRef.current.length && !snapshotUrl) {
+        unlistenZoomHud = await listen<{ 
+          zoomed: boolean; 
+          factor: number;
+          showToast?: boolean;
+          showCorner?: boolean;
+        }>('zoom-hud', async (event) => {
+          if (event.payload) {
+            const isZoomed = Boolean(event.payload.zoomed);
+            const factor = Number(event.payload.factor) || 2.0;
+            const showToast = event.payload.showToast !== false;
+            const showCorner = event.payload.showCorner !== false;
+
+            // Manage corner indicator
+            setIsZoomCornerActive(isZoomed && showCorner);
+            setActiveZoomFactor(factor);
+
+            if (showToast) {
+              setZoomToast({ zoomed: isZoomed, factor });
+
+              if (zoomToastTimeoutRef.current) {
+                clearTimeout(zoomToastTimeoutRef.current);
+              }
+              zoomToastTimeoutRef.current = setTimeout(async () => {
+                setZoomToast(null);
+                // If corner indicator is NOT active and not drawing, release overlay
+                if (!(isZoomed && showCorner) && !isDrawingRef.current && !snapshotUrl && countdownValue === null && !cutAnimation) {
+                  try {
+                    const { invoke } = await import('@tauri-apps/api/core');
+                    await invoke('hide_overlay');
+                  } catch {}
+                }
+              }, 1400);
+            } else if (!isZoomed && !isDrawingRef.current && !snapshotUrl) {
               try {
                 const { invoke } = await import('@tauri-apps/api/core');
                 await invoke('hide_overlay');
               } catch {}
             }
+          }
+        });
+
+        unlistenKeystrokeHud = await listen<{ combo: string }>('keystroke-hud', (event) => {
+          if (event.payload?.combo) {
+            const combo = event.payload.combo;
+            if (
+              combo === 'Alt + R' || combo === 'F6' ||
+              combo === 'Alt + P' || combo === 'F7' ||
+              combo === 'Alt + Z' || combo === 'F9' ||
+              combo === 'Alt + D' || combo === 'F8' ||
+              combo === 'Alt + C' || combo === 'F10'
+            ) {
+              return;
+            }
+
+            setKeystrokeToast(combo);
+            if (keystrokeToastTimeoutRef.current) {
+              clearTimeout(keystrokeToastTimeoutRef.current);
+            }
+            keystrokeToastTimeoutRef.current = setTimeout(async () => {
+              setKeystrokeToast(null);
+              if (!isDrawingRef.current && !snapshotUrl && countdownValue === null && !cutAnimation) {
+                try {
+                  const { invoke } = await import('@tauri-apps/api/core');
+                  await invoke('hide_overlay');
+                } catch {}
+              }
+            }, 2200);
+          }
+        });
+
+        unlistenCut = await listen<{ duration: number }>('recording-stopped-animation', (event) => {
+          setCountdownValue(null);
+          // Unconditionally reset drawing, zoom and freeze state
+          setIsDrawingActive(false);
+          setIsZoomCornerActive(false);
+          setZoomToast(null);
+          setKeystrokeToast(null);
+          setSnapshotUrl(null);
+          strokesRef.current = [];
+          currentStrokeRef.current = null;
+          setCutAnimation({ active: true, duration: event.payload?.duration || 0 });
+          setTimeout(async () => {
+            setCutAnimation(null);
+            try {
+              const { invoke } = await import('@tauri-apps/api/core');
+              await invoke('hide_overlay');
+            } catch {}
           }, 1600);
         });
       } catch (e) {}
@@ -65,11 +175,18 @@ export function OverlayCanvas() {
     return () => {
       if (unlistenFreeze) unlistenFreeze();
       if (unlistenUnfreeze) unlistenUnfreeze();
+      if (unlistenExit) unlistenExit();
+      if (unlistenDrawingMode) unlistenDrawingMode();
+      if (unlistenClear) unlistenClear();
       if (unlistenTick) unlistenTick();
       if (unlistenEnd) unlistenEnd();
       if (unlistenCut) unlistenCut();
+      if (unlistenZoomHud) unlistenZoomHud();
+      if (unlistenKeystrokeHud) unlistenKeystrokeHud();
+      if (zoomToastTimeoutRef.current) clearTimeout(zoomToastTimeoutRef.current);
+      if (keystrokeToastTimeoutRef.current) clearTimeout(keystrokeToastTimeoutRef.current);
     };
-  }, [snapshotUrl]);
+  }, []);
 
   // Resize canvas to full screen resolution
   useEffect(() => {
@@ -102,12 +219,20 @@ export function OverlayCanvas() {
   }, []);
 
   const closeOverlay = async () => {
+    setIsDrawingActive(false);
+    setSnapshotUrl(null);
+    strokesRef.current = [];
+    currentStrokeRef.current = null;
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('hide_overlay');
-    } catch (e) {
-      // Fallback
-    }
+    } catch (e) {}
+    try {
+      const { emit } = await import('@tauri-apps/api/event');
+      await emit('exit-draw', {});
+      await emit('set-drawing-mode', { active: false });
+      await emit('unfreeze-snapshot', {});
+    } catch {}
   };
 
   const clearAll = async () => {
@@ -173,16 +298,35 @@ export function OverlayCanvas() {
         ctx.lineWidth = canvas.width * stroke.width;
 
         if (stroke.tool === 'pen' || stroke.tool === 'highlighter') {
-          ctx.beginPath();
-          ctx.moveTo(stroke.points[0].x * canvas.width, stroke.points[0].y * canvas.height);
-
-          if (stroke.points.length === 1) {
-            ctx.arc(stroke.points[0].x * canvas.width, stroke.points[0].y * canvas.height, ctx.lineWidth / 2, 0, Math.PI * 2);
+          const pts = stroke.points;
+          if (pts.length === 1) {
+            ctx.beginPath();
+            ctx.arc(pts[0].x * canvas.width, pts[0].y * canvas.height, ctx.lineWidth / 2, 0, Math.PI * 2);
             ctx.fill();
-          } else {
-            for (let i = 1; i < stroke.points.length; i++) {
-              ctx.lineTo(stroke.points[i].x * canvas.width, stroke.points[i].y * canvas.height);
+          } else if (pts.length === 2 || !isSmoothing) {
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x * canvas.width, pts[0].y * canvas.height);
+            for (let i = 1; i < pts.length; i++) {
+              ctx.lineTo(pts[i].x * canvas.width, pts[i].y * canvas.height);
             }
+            ctx.stroke();
+          } else {
+            // High-precision smooth quadratic bezier curve through midpoints
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x * canvas.width, pts[0].y * canvas.height);
+            for (let i = 1; i < pts.length - 1; i++) {
+              const xc = ((pts[i].x + pts[i + 1].x) / 2) * canvas.width;
+              const yc = ((pts[i].y + pts[i + 1].y) / 2) * canvas.height;
+              ctx.quadraticCurveTo(pts[i].x * canvas.width, pts[i].y * canvas.height, xc, yc);
+            }
+            const last = pts[pts.length - 1];
+            const prev = pts[pts.length - 2];
+            ctx.quadraticCurveTo(
+              prev.x * canvas.width,
+              prev.y * canvas.height,
+              last.x * canvas.width,
+              last.y * canvas.height
+            );
             ctx.stroke();
           }
         } else if (stroke.tool === 'rect') {
@@ -242,7 +386,24 @@ export function OverlayCanvas() {
     if (!isDrawingRef.current || !currentStrokeRef.current) return;
     const nx = e.clientX / window.innerWidth;
     const ny = e.clientY / window.innerHeight;
-    currentStrokeRef.current.points.push({ x: nx, y: ny });
+
+    const pts = currentStrokeRef.current.points;
+    const lastPt = pts[pts.length - 1];
+
+    // Subpixel jitter deadzone (ignore tremor < 2px)
+    const dx = (nx - lastPt.x) * window.innerWidth;
+    const dy = (ny - lastPt.y) * window.innerHeight;
+    if (dx * dx + dy * dy < 4) return;
+
+    if (isSmoothing && (currentStrokeRef.current.tool === 'pen' || currentStrokeRef.current.tool === 'highlighter')) {
+      // Exponential moving average filter to soften hand jitter
+      const smoothWeight = 0.72;
+      const smoothNx = lastPt.x + (nx - lastPt.x) * smoothWeight;
+      const smoothNy = lastPt.y + (ny - lastPt.y) * smoothWeight;
+      pts.push({ x: smoothNx, y: smoothNy });
+    } else {
+      pts.push({ x: nx, y: ny });
+    }
   };
 
   const handleMouseUp = () => {
@@ -261,6 +422,8 @@ export function OverlayCanvas() {
     isDrawingRef.current = false;
   };
 
+  const isInteractiveDrawing = isDrawingActive || Boolean(snapshotUrl);
+
   return (
     <div style={{
       position: 'fixed',
@@ -273,42 +436,49 @@ export function OverlayCanvas() {
       backgroundPosition: 'center',
       backgroundRepeat: 'no-repeat',
       overflow: 'hidden',
-      cursor: 'crosshair',
+      cursor: isInteractiveDrawing ? 'crosshair' : 'default',
+      pointerEvents: isInteractiveDrawing ? 'auto' : 'none',
       userSelect: 'none'
     }}>
-      {/* Interactive Drawing Canvas */}
-      <canvas
-        ref={canvasRef}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          display: 'block'
-        }}
-      />
+      {/* Interactive Drawing Canvas (Active ONLY during drawing mode) */}
+      {isInteractiveDrawing && (
+        <canvas
+          ref={canvasRef}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            display: 'block',
+            cursor: 'crosshair',
+            pointerEvents: 'auto'
+          }}
+        />
+      )}
 
-      {/* Sleek Floating Palette for the Screen Overlay */}
-      <div style={{
-        position: 'fixed',
-        bottom: '24px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        padding: '8px 16px',
-        backgroundColor: 'rgba(15, 23, 42, 0.88)',
-        backdropFilter: 'blur(16px)',
-        borderRadius: '16px',
-        border: '1px solid rgba(255, 255, 255, 0.15)',
-        boxShadow: '0 20px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(139, 92, 246, 0.3)',
-        zIndex: 99999,
-        cursor: 'default'
-      }}>
+      {/* Sleek Floating Palette for the Screen Overlay (Shown ONLY during drawing mode) */}
+      {isInteractiveDrawing && (
+        <div style={{
+          position: 'fixed',
+          bottom: '24px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '8px 16px',
+          backgroundColor: 'rgba(15, 23, 42, 0.88)',
+          backdropFilter: 'blur(16px)',
+          borderRadius: '16px',
+          border: '1px solid rgba(255, 255, 255, 0.15)',
+          boxShadow: '0 20px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(139, 92, 246, 0.3)',
+          zIndex: 99999,
+          cursor: 'default',
+          pointerEvents: 'auto'
+        }}>
         {/* Tools */}
         <div style={{ display: 'flex', gap: '4px' }}>
           <button
@@ -425,6 +595,28 @@ export function OverlayCanvas() {
           <span>Auto-fade</span>
         </button>
 
+        {/* Lissage Intelligent */}
+        <button
+          onClick={() => setIsSmoothing(!isSmoothing)}
+          title={isSmoothing ? "Lissage intelligent actif (courbes fluides et douces)" : "Lissage désactivé"}
+          style={{
+            padding: '6px 10px',
+            borderRadius: '8px',
+            backgroundColor: isSmoothing ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+            color: isSmoothing ? '#38bdf8' : 'rgba(255,255,255,0.6)',
+            border: isSmoothing ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid transparent',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontSize: '12px',
+            fontWeight: isSmoothing ? 600 : 400
+          }}
+        >
+          <Sparkles size={14} />
+          <span>Lissage</span>
+        </button>
+
         {/* Clear button */}
         <button
           onClick={clearAll}
@@ -468,6 +660,153 @@ export function OverlayCanvas() {
           <span>Fermer (Echap)</span>
         </button>
       </div>
+      )}
+
+      {/* Floating HUD Toast Notification (Zoom feedback) */}
+      {zoomToast && (
+        <div style={{
+          position: 'fixed',
+          top: '32px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '10px 22px',
+          backgroundColor: zoomToast.zoomed ? 'rgba(15, 23, 42, 0.94)' : 'rgba(15, 23, 42, 0.90)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+          borderRadius: '9999px',
+          border: zoomToast.zoomed ? '1.5px solid rgba(56, 189, 248, 0.7)' : '1.5px solid rgba(148, 163, 184, 0.4)',
+          boxShadow: zoomToast.zoomed 
+            ? '0 12px 36px rgba(0, 0, 0, 0.6), 0 0 28px rgba(56, 189, 248, 0.4)' 
+            : '0 12px 30px rgba(0, 0, 0, 0.5)',
+          color: '#ffffff',
+          fontSize: '14px',
+          fontWeight: 600,
+          letterSpacing: '0.3px',
+          pointerEvents: 'none',
+          zIndex: 9999999,
+          userSelect: 'none'
+        }}>
+          {zoomToast.zoomed ? (
+            <>
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '26px',
+                height: '26px',
+                borderRadius: '50%',
+                background: 'rgba(56, 189, 248, 0.2)',
+                color: '#38bdf8'
+              }}>
+                <ZoomIn size={16} />
+              </span>
+              <span style={{ color: '#38bdf8', fontWeight: 800 }}>Zoom {zoomToast.factor.toFixed(1)}x</span>
+              <span style={{ color: 'rgba(255, 255, 255, 0.75)', fontSize: '12px', fontWeight: 500 }}>Activé (Alt + Z)</span>
+            </>
+          ) : (
+            <>
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '26px',
+                height: '26px',
+                borderRadius: '50%',
+                background: 'rgba(255, 255, 255, 0.1)',
+                color: '#94a3b8'
+              }}>
+                <Maximize2 size={16} />
+              </span>
+              <span style={{ color: '#f1f5f9', fontWeight: 700 }}>Plein Écran</span>
+              <span style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '12px', fontWeight: 500 }}>Zoom désactivé</span>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Discreet Persistent Corner Indicator while Zoom is Active */}
+      {isZoomCornerActive && (
+        <div style={{
+          position: 'fixed',
+          top: '18px',
+          right: '22px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '6px 14px',
+          backgroundColor: 'rgba(15, 23, 42, 0.88)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          borderRadius: '8px',
+          border: '1.5px solid rgba(56, 189, 248, 0.65)',
+          boxShadow: '0 6px 20px rgba(0,0,0,0.6), 0 0 16px rgba(56, 189, 248, 0.35)',
+          color: '#f8fafc',
+          fontSize: '11px',
+          fontWeight: 800,
+          letterSpacing: '0.05em',
+          pointerEvents: 'none',
+          zIndex: 9999999,
+          userSelect: 'none'
+        }}>
+          <span style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            backgroundColor: '#38bdf8',
+            boxShadow: '0 0 10px #38bdf8'
+          }} />
+          <span>ZOOM {activeZoomFactor.toFixed(1)}x</span>
+        </div>
+      )}
+
+      {/* Live Keystroke Visualizer Toast on Screen */}
+      {keystrokeToast && (
+        <div style={{
+          position: 'fixed',
+          bottom: '48px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '10px 18px',
+          backgroundColor: 'rgba(15, 23, 42, 0.92)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          borderRadius: '12px',
+          border: '1.5px solid rgba(255, 255, 255, 0.2)',
+          boxShadow: '0 12px 32px rgba(0,0,0,0.65), 0 0 20px rgba(56, 189, 248, 0.3)',
+          pointerEvents: 'none',
+          zIndex: 9999999,
+          userSelect: 'none'
+        }}>
+          {keystrokeToast.split(' + ').map((part, idx, arr) => (
+            <React.Fragment key={idx}>
+              <span style={{
+                display: 'inline-block',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                backgroundColor: 'rgba(30, 41, 59, 0.95)',
+                border: '1px solid rgba(56, 189, 248, 0.45)',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1)',
+                color: '#f8fafc',
+                fontSize: '13px',
+                fontWeight: 800,
+                letterSpacing: '0.04em',
+                fontFamily: 'system-ui, -apple-system, sans-serif'
+              }}>
+                {part}
+              </span>
+              {idx < arr.length - 1 && (
+                <span style={{ color: 'rgba(148, 163, 184, 0.8)', fontSize: '13px', fontWeight: 700 }}>+</span>
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+      )}
 
       {/* Screen-Wide Glowing Countdown Overlay */}
       {countdownValue !== null && (

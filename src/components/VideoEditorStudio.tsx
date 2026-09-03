@@ -16,17 +16,21 @@ import {
   AMBIENT_MUSIC_PRESETS,
   generateAmbientMusicBlob,
   calculateTotalDuration, 
-  drawTitleOverlay 
+  drawTitleOverlay,
+  drawFastForwardBadge
 } from '../utils/videoCompositor';
 import { 
   Film, Plus, Trash2, Play, Pause, 
   Download, Sparkles, Type, Layers, Check, X, Save, FolderOpen, 
-  FileText, Upload, RefreshCw, Music, Volume2, VolumeX, Headphones, Mic
+  FileText, Upload, RefreshCw, Music, Volume2, VolumeX, Headphones, Mic,
+  Scissors, FastForward
 } from 'lucide-react';
 import { GifExportModal } from './GifExportModal';
 import { DeviceFrameModal } from './DeviceFrameModal';
 import { SubtitlesStudioModal } from './SubtitlesStudioModal';
 import { VoiceGeneratorModal } from './VoiceGeneratorModal';
+import { SilenceRemoverModal } from './SilenceRemoverModal';
+import type { SpeechSegment } from '../utils/audioSilenceDetector';
 
 export function VideoEditorStudio() {
   const [libraryVideos, setLibraryVideos] = useState<SavedVideo[]>([]);
@@ -39,6 +43,8 @@ export function VideoEditorStudio() {
   const [frameModalVideo, setFrameModalVideo] = useState<SavedVideo | null>(null);
   const [subtitlesModalVideo, setSubtitlesModalVideo] = useState<SavedVideo | null>(null);
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState<boolean>(false);
+  const [silenceRemoverClip, setSilenceRemoverClip] = useState<TimelineClip | null>(null);
+  const [silenceRemoverLibraryVideo, setSilenceRemoverLibraryVideo] = useState<SavedVideo | null>(null);
 
   // Chutier tab ('videos' or 'audio')
   const [chutierTab, setChutierTab] = useState<'videos' | 'audio'>('videos');
@@ -506,6 +512,107 @@ export function VideoEditorStudio() {
     }));
   };
 
+  const updateClipSpeed = (id: string, playbackSpeed: number) => {
+    setProject((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) => c.id === id ? {
+        ...c,
+        playbackSpeed,
+        showFastForwardBadge: playbackSpeed > 1
+      } : c)
+    }));
+  };
+
+  const splitAndFastForward = (clipId: string, speed: number = 4) => {
+    setProject((prev) => {
+      const idx = prev.clips.findIndex((c) => c.id === clipId);
+      if (idx === -1) return prev;
+      const c = prev.clips[idx];
+      const dur = c.endTrim - c.startTrim;
+      if (dur < 3) {
+        return {
+          ...prev,
+          clips: prev.clips.map((item) => item.id === clipId ? { ...item, playbackSpeed: speed, showFastForwardBadge: true } : item)
+        };
+      }
+
+      const part1End = c.startTrim + dur * 0.25;
+      const part2End = c.startTrim + dur * 0.75;
+
+      const clip1: TimelineClip = {
+        ...c,
+        id: `clip_${Date.now()}_1`,
+        startTrim: c.startTrim,
+        endTrim: part1End,
+        playbackSpeed: 1.0,
+        showFastForwardBadge: false,
+        transitionToNext: 'none'
+      };
+
+      const clip2: TimelineClip = {
+        ...c,
+        id: `clip_${Date.now()}_2`,
+        startTrim: part1End,
+        endTrim: part2End,
+        playbackSpeed: speed,
+        showFastForwardBadge: true,
+        transitionToNext: 'none'
+      };
+
+      const clip3: TimelineClip = {
+        ...c,
+        id: `clip_${Date.now()}_3`,
+        startTrim: part2End,
+        endTrim: c.endTrim,
+        playbackSpeed: 1.0,
+        showFastForwardBadge: false
+      };
+
+      const updated = [...prev.clips];
+      updated.splice(idx, 1, clip1, clip2, clip3);
+      return { ...prev, clips: updated };
+    });
+  };
+
+  const handleApplySilenceSegmentsToClip = (targetClipId: string, speechSegments: SpeechSegment[]) => {
+    setProject((prev) => {
+      const clipIndex = prev.clips.findIndex((c) => c.id === targetClipId);
+      if (clipIndex === -1) return prev;
+      const originalClip = prev.clips[clipIndex];
+
+      const newClips: TimelineClip[] = speechSegments.map((seg, idx) => ({
+        id: `clip_${Date.now()}_${idx}`,
+        video: originalClip.video,
+        startTrim: seg.start,
+        endTrim: seg.end,
+        transitionToNext: idx === speechSegments.length - 1 ? originalClip.transitionToNext : 'none',
+        transitionDuration: originalClip.transitionDuration,
+        playbackSpeed: originalClip.playbackSpeed,
+        showFastForwardBadge: originalClip.showFastForwardBadge
+      }));
+
+      const updatedClips = [...prev.clips];
+      updatedClips.splice(clipIndex, 1, ...newClips);
+      return { ...prev, clips: updatedClips };
+    });
+  };
+
+  const handleApplySilenceSegmentsToLibraryVideo = (video: SavedVideo, speechSegments: SpeechSegment[]) => {
+    const newClips: TimelineClip[] = speechSegments.map((seg, idx) => ({
+      id: `clip_${Date.now()}_${idx}`,
+      video: video,
+      startTrim: seg.start,
+      endTrim: seg.end,
+      transitionToNext: 'none',
+      transitionDuration: 0.5,
+      playbackSpeed: 1.0
+    }));
+    setProject((prev) => ({
+      ...prev,
+      clips: [...prev.clips, ...newClips]
+    }));
+  };
+
   // --- Title Manipulation ---
 
   const handleSaveTitle = () => {
@@ -597,7 +704,8 @@ export function VideoEditorStudio() {
       let cumulative = 0;
       for (let i = 0; i < project.clips.length; i++) {
         const clip = project.clips[i];
-        const clipDuration = Math.max(0.1, clip.endTrim - clip.startTrim);
+        const speed = clip.playbackSpeed && clip.playbackSpeed > 0 ? clip.playbackSpeed : 1.0;
+        const clipDuration = Math.max(0.1, (clip.endTrim - clip.startTrim) / speed);
         const isLast = i === project.clips.length - 1;
         const transDur = (!isLast && clip.transitionToNext !== 'none')
           ? Math.min(clip.transitionDuration, clipDuration / 2)
@@ -609,12 +717,16 @@ export function VideoEditorStudio() {
 
         if (currentTime >= clipStart && currentTime <= clipEnd) {
           if (videoEl) {
+            videoEl.playbackRate = speed;
             if (videoEl.paused && isPlaying) {
-              videoEl.currentTime = (currentTime - clipStart) + clip.startTrim;
+              videoEl.currentTime = ((currentTime - clipStart) * speed) + clip.startTrim;
               videoEl.play().catch(() => {});
             }
             if (videoEl.readyState >= 2) {
               ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+              if (speed > 1.0) {
+                drawFastForwardBadge(ctx, speed, canvas.width, canvas.height);
+              }
             }
           }
 
@@ -694,7 +806,8 @@ export function VideoEditorStudio() {
     let cumulative = 0;
     for (let i = 0; i < project.clips.length; i++) {
       const clip = project.clips[i];
-      const clipDuration = Math.max(0.1, clip.endTrim - clip.startTrim);
+      const speed = clip.playbackSpeed && clip.playbackSpeed > 0 ? clip.playbackSpeed : 1.0;
+      const clipDuration = Math.max(0.1, (clip.endTrim - clip.startTrim) / speed);
       const isLast = i === project.clips.length - 1;
       const transDur = (!isLast && clip.transitionToNext !== 'none')
         ? Math.min(clip.transitionDuration, clipDuration / 2)
@@ -705,8 +818,14 @@ export function VideoEditorStudio() {
 
       if (time >= clipStart && time <= clipEnd) {
         const videoEl = videoElementsRef.current.get(clip.id);
-        if (videoEl && videoEl.readyState >= 2) {
-          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+        if (videoEl) {
+          videoEl.currentTime = ((time - clipStart) * speed) + clip.startTrim;
+          if (videoEl.readyState >= 2) {
+            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+            if (speed > 1.0) {
+              drawFastForwardBadge(ctx, speed, canvas.width, canvas.height);
+            }
+          }
         }
         break;
       }
@@ -838,7 +957,8 @@ export function VideoEditorStudio() {
         let cumulative = 0;
         for (let i = 0; i < project.clips.length; i++) {
           const clip = project.clips[i];
-          const clipDuration = Math.max(0.1, clip.endTrim - clip.startTrim);
+          const speed = clip.playbackSpeed && clip.playbackSpeed > 0 ? clip.playbackSpeed : 1.0;
+          const clipDuration = Math.max(0.1, (clip.endTrim - clip.startTrim) / speed);
           const isLast = i === project.clips.length - 1;
           const transDur = (!isLast && clip.transitionToNext !== 'none')
             ? Math.min(clip.transitionDuration, clipDuration / 2)
@@ -850,12 +970,16 @@ export function VideoEditorStudio() {
 
           if (exportTime >= clipStart && exportTime <= clipEnd) {
             if (videoEl) {
+              videoEl.playbackRate = speed;
               if (videoEl.paused) {
-                videoEl.currentTime = (exportTime - clipStart) + clip.startTrim;
+                videoEl.currentTime = ((exportTime - clipStart) * speed) + clip.startTrim;
                 videoEl.play().catch(() => {});
               }
               if (videoEl.readyState >= 2) {
                 exportCtx.drawImage(videoEl, 0, 0, exportCanvas.width, exportCanvas.height);
+                if (speed > 1.0) {
+                  drawFastForwardBadge(exportCtx, speed, exportCanvas.width, exportCanvas.height);
+                }
               }
             }
 
@@ -1116,14 +1240,24 @@ export function VideoEditorStudio() {
                       <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{formatTime(v.duration)}</span>
                     </div>
                   </div>
-                  <button
-                    className="btn-toolbar"
-                    style={{ padding: '2px 5px', fontSize: '10px', backgroundColor: 'rgba(139, 92, 246, 0.25)', color: '#c084fc' }}
-                    onClick={() => addClipToTimeline(v)}
-                    title="Ajouter à la timeline"
-                  >
-                    <Plus size={11} />
-                  </button>
+                  <div style={{ display: 'flex', gap: '3px' }}>
+                    <button
+                      className="btn-toolbar"
+                      style={{ padding: '2px 5px', fontSize: '10px', backgroundColor: 'rgba(6, 182, 212, 0.2)', color: '#38bdf8' }}
+                      onClick={() => setSilenceRemoverLibraryVideo(v)}
+                      title="Détecter et supprimer les silences avant d'ajouter à la timeline"
+                    >
+                      <Scissors size={11} />
+                    </button>
+                    <button
+                      className="btn-toolbar"
+                      style={{ padding: '2px 5px', fontSize: '10px', backgroundColor: 'rgba(139, 92, 246, 0.25)', color: '#c084fc' }}
+                      onClick={() => addClipToTimeline(v)}
+                      title="Ajouter brut à la timeline"
+                    >
+                      <Plus size={11} />
+                    </button>
+                  </div>
                 </div>
               ))}
               {libraryVideos.length === 0 && (
@@ -1475,18 +1609,34 @@ export function VideoEditorStudio() {
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '3px',
+                    gap: '4px',
                     padding: '6px 8px',
-                    backgroundColor: 'rgba(255,255,255,0.04)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '5px',
-                    minWidth: '160px'
+                    backgroundColor: (clip.playbackSpeed || 1.0) > 1 ? 'rgba(245, 158, 11, 0.08)' : 'rgba(255,255,255,0.04)',
+                    border: (clip.playbackSpeed || 1.0) > 1 ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid var(--border-color)',
+                    borderRadius: '6px',
+                    minWidth: '185px'
                   }}
                 >
+                  {/* Top Row: Title + Speed Badge + Delete */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '10px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '110px' }}>
-                      {clip.video.title}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden' }}>
+                      {(clip.playbackSpeed || 1.0) > 1 && (
+                        <span style={{
+                          fontSize: '8px',
+                          fontWeight: 800,
+                          color: '#fde68a',
+                          backgroundColor: 'rgba(245, 158, 11, 0.3)',
+                          padding: '1px 4px',
+                          borderRadius: '3px',
+                          border: '1px solid #f59e0b'
+                        }}>
+                          ⏩ {clip.playbackSpeed}x
+                        </span>
+                      )}
+                      <span style={{ fontSize: '10px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100px' }}>
+                        {clip.video.title}
+                      </span>
+                    </div>
                     <button
                       style={{ background: 'transparent', border: 'none', color: '#fb7185', cursor: 'pointer', padding: 0 }}
                       onClick={() => removeClipFromTimeline(clip.id)}
@@ -1496,12 +1646,16 @@ export function VideoEditorStudio() {
                     </button>
                   </div>
 
+                  {/* Trims + Effective Duration */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '9px', color: 'var(--text-muted)' }}>
-                    <span>Début: {clip.startTrim.toFixed(1)}s</span>
-                    <span>Fin: {clip.endTrim.toFixed(1)}s</span>
+                    <span>{clip.startTrim.toFixed(1)}s - {clip.endTrim.toFixed(1)}s</span>
+                    <span style={{ color: (clip.playbackSpeed || 1.0) > 1 ? '#fde68a' : 'var(--text-secondary)', fontWeight: 600 }}>
+                      Durée: {(((clip.endTrim - clip.startTrim) / (clip.playbackSpeed || 1.0))).toFixed(1)}s
+                    </span>
                   </div>
 
-                  <div style={{ display: 'flex', gap: '4px', marginTop: '2px' }}>
+                  {/* Trim Inputs & Move Buttons */}
+                  <div style={{ display: 'flex', gap: '4px', marginTop: '1px' }}>
                     <button
                       className="btn-toolbar"
                       style={{ padding: '2px 4px', fontSize: '9px' }}
@@ -1527,7 +1681,7 @@ export function VideoEditorStudio() {
                       step={0.5}
                       value={clip.startTrim}
                       onChange={(e) => updateClipTrim(clip.id, parseFloat(e.target.value) || 0, clip.endTrim)}
-                      style={{ width: '42px', fontSize: '9px', padding: '1px 3px' }}
+                      style={{ width: '44px', fontSize: '9px', padding: '1px 3px' }}
                       className="form-input"
                       title="Rognage début (s)"
                     />
@@ -1538,10 +1692,52 @@ export function VideoEditorStudio() {
                       step={0.5}
                       value={clip.endTrim}
                       onChange={(e) => updateClipTrim(clip.id, clip.startTrim, parseFloat(e.target.value) || 10)}
-                      style={{ width: '42px', fontSize: '9px', padding: '1px 3px' }}
+                      style={{ width: '44px', fontSize: '9px', padding: '1px 3px' }}
                       className="form-input"
                       title="Rognage fin (s)"
                     />
+                  </div>
+
+                  {/* Fast-Forward & Silence Remover Action Tools */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px', paddingTop: '4px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    <select
+                      value={clip.playbackSpeed || 1.0}
+                      onChange={(e) => updateClipSpeed(clip.id, parseFloat(e.target.value))}
+                      style={{
+                        fontSize: '9px',
+                        padding: '1px 3px',
+                        borderRadius: '3px',
+                        backgroundColor: (clip.playbackSpeed || 1.0) > 1 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(15, 23, 42, 0.7)',
+                        color: (clip.playbackSpeed || 1.0) > 1 ? '#fde68a' : 'var(--text-secondary)',
+                        border: (clip.playbackSpeed || 1.0) > 1 ? '1px solid #f59e0b' : '1px solid var(--border-color)',
+                        cursor: 'pointer'
+                      }}
+                      title="Vitesse de lecture / Avance Rapide"
+                    >
+                      <option value="1">1x Normal</option>
+                      <option value="2">2x</option>
+                      <option value="4">4x</option>
+                      <option value="8">8x</option>
+                      <option value="16">16x</option>
+                    </select>
+
+                    <button
+                      className="btn-toolbar"
+                      style={{ padding: '1px 5px', fontSize: '9px', color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.4)', display: 'flex', alignItems: 'center', gap: '3px' }}
+                      onClick={() => splitAndFastForward(clip.id, 4)}
+                      title="Isoler et accélérer en 4x le temps de chargement au milieu de ce clip"
+                    >
+                      <FastForward size={9} /> 4x
+                    </button>
+
+                    <button
+                      className="btn-toolbar"
+                      style={{ padding: '1px 5px', fontSize: '9px', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.4)', display: 'flex', alignItems: 'center', gap: '3px' }}
+                      onClick={() => setSilenceRemoverClip(clip)}
+                      title="Supprimer automatiquement les blancs et pauses de ce clip"
+                    >
+                      <Scissors size={9} /> Silences
+                    </button>
                   </div>
                 </div>
 
@@ -1846,6 +2042,24 @@ export function VideoEditorStudio() {
             }));
             setIsVoiceModalOpen(false);
           }}
+        />
+      )}
+
+      {/* Silence Remover for a Timeline Clip */}
+      {silenceRemoverClip && (
+        <SilenceRemoverModal
+          video={silenceRemoverClip.video}
+          onClose={() => setSilenceRemoverClip(null)}
+          onApplySegments={(segments) => handleApplySilenceSegmentsToClip(silenceRemoverClip.id, segments)}
+        />
+      )}
+
+      {/* Silence Remover for a Library Video */}
+      {silenceRemoverLibraryVideo && (
+        <SilenceRemoverModal
+          video={silenceRemoverLibraryVideo}
+          onClose={() => setSilenceRemoverLibraryVideo(null)}
+          onApplySegments={(segments) => handleApplySilenceSegmentsToLibraryVideo(silenceRemoverLibraryVideo, segments)}
         />
       )}
     </div>

@@ -45,7 +45,15 @@ function MainApp() {
     autoZoomDuration: 2.8,
     selectedMicId: '',
     selectedCamId: '',
-    captureSourcePreference: 'screen'
+    captureSourcePreference: 'screen',
+    zoomSoundFeedback: true,
+    zoomToastFeedback: true,
+    zoomCornerIndicator: true,
+    enableCinematicCursor: true,
+    cursorSize: 'large',
+    cursorSmoothingSpeed: 'cinematic',
+    enableKeystrokeHUD: true,
+    keystrokeHUDPosition: 'bottom-center'
   });
 
   // Instantiate recording engine hook
@@ -242,18 +250,40 @@ function MainApp() {
             </div>
           </div>
 
+          {/* Creator Profile & GitHub Link */}
           <a 
             href="https://github.com/gotenash/OpenPeek" 
             target="_blank" 
             rel="noreferrer" 
-            className="nav-item"
-            style={{ padding: '8px 12px', fontSize: '13px' }}
+            className="author-card"
+            title="gotenash / OpenPeek sur GitHub"
           >
-            <Globe size={16} />
-            GitHub
+            <img 
+              src="/avatar.png" 
+              alt="gotenash" 
+              style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                border: '2px solid #8b5cf6',
+                boxShadow: '0 0 10px rgba(139, 92, 246, 0.4)',
+                objectFit: 'cover',
+                flexShrink: 0
+              }}
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                gotenash
+                <Globe size={11} color="#8b5cf6" />
+              </span>
+              <span style={{ fontSize: '10px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                OpenPeek
+              </span>
+            </div>
           </a>
+
           <div className="version-info">
-            OpenPeek v1.0.0 • Open Source
+            OpenPeek v1.2.0 • Open Source
           </div>
         </div>
       </aside>
@@ -274,7 +304,16 @@ function MainApp() {
 }
 
 export default function App() {
-  const isOverlayWindow = window.location.hash === '#overlay' || window.location.search.includes('overlay');
+  const isOverlayWindow = window.location.hash.includes('overlay') || window.location.search.includes('overlay');
+
+  if (isOverlayWindow) {
+    document.documentElement.classList.add('overlay-mode');
+    document.body.classList.add('overlay-mode');
+    document.documentElement.style.background = 'transparent';
+    document.body.style.background = 'transparent';
+    document.body.style.backgroundColor = 'transparent';
+    document.body.style.backgroundImage = 'none';
+  }
 
   return (
     <I18nProvider>

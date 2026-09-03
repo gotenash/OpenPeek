@@ -4,6 +4,7 @@ import { X, Scissors, Play, Pause, RotateCcw, Check, Download, Sparkles, Layers,
 import { GifExportModal } from './GifExportModal';
 import { DeviceFrameModal } from './DeviceFrameModal';
 import { SubtitlesStudioModal } from './SubtitlesStudioModal';
+import { SilenceRemoverModal } from './SilenceRemoverModal';
 
 interface VideoTrimmerModalProps {
   video: SavedVideo;
@@ -23,6 +24,7 @@ export function VideoTrimmerModal({ video, onClose, onTrimComplete }: VideoTrimm
   const [showGifModal, setShowGifModal] = useState(false);
   const [showFrameModal, setShowFrameModal] = useState(false);
   const [showSubtitlesModal, setShowSubtitlesModal] = useState(false);
+  const [showSilenceModal, setShowSilenceModal] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoUrlRef = useRef<string>(URL.createObjectURL(video.blob));
@@ -434,6 +436,17 @@ export function VideoTrimmerModal({ video, onClose, onTrimComplete }: VideoTrimm
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
               className="btn-secondary"
+              onClick={() => setShowSilenceModal(true)}
+              disabled={isProcessing}
+              style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.4)' }}
+              title="Détecter et couper les silences"
+            >
+              <Scissors size={14} />
+              <span>Silences</span>
+            </button>
+
+            <button
+              className="btn-secondary"
               onClick={() => setShowSubtitlesModal(true)}
               disabled={isProcessing}
               style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', color: '#fde047', borderColor: 'rgba(253, 224, 71, 0.4)' }}
@@ -508,6 +521,21 @@ export function VideoTrimmerModal({ video, onClose, onTrimComplete }: VideoTrimm
           onClose={() => setShowSubtitlesModal(false)}
           onSavedToLibrary={() => {
             onTrimComplete();
+          }}
+        />
+      )}
+
+      {showSilenceModal && (
+        <SilenceRemoverModal
+          video={video}
+          onClose={() => setShowSilenceModal(false)}
+          onApplySegments={(segments) => {
+            if (segments.length > 0) {
+              setStartTime(segments[0].start);
+              setEndTime(segments[segments.length - 1].end);
+              seekTo(segments[0].start);
+            }
+            setShowSilenceModal(false);
           }}
         />
       )}

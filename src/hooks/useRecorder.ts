@@ -22,6 +22,15 @@ export interface RecorderOptions {
   selectedMicId: string;
   selectedCamId: string;
   captureSourcePreference?: 'screen' | 'window';
+  zoomSoundFeedback?: boolean;
+  zoomToastFeedback?: boolean;
+  zoomCornerIndicator?: boolean;
+  zoomVisualFeedback?: boolean;
+  enableCinematicCursor?: boolean;
+  cursorSize?: 'normal' | 'large' | 'xlarge';
+  cursorSmoothingSpeed?: 'smooth' | 'cinematic' | 'direct';
+  enableKeystrokeHUD?: boolean;
+  keystrokeHUDPosition?: 'bottom-center' | 'bottom-left' | 'bottom-right' | 'top-right';
 }
 
 export type DrawTool = 'pen' | 'arrow' | 'rect' | 'highlighter';
@@ -56,10 +65,13 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
   const isRecordingRef = useRef(false);
   const isPausedRef = useRef(false);
   const countdownRef = useRef<number | null>(null);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
   useEffect(() => { countdownRef.current = countdown; }, [countdown]);
+  useEffect(() => { optionsRef.current = options; }, [options]);
 
   // Click Ripples active queue
   const ripplesRef = useRef<Array<{ id: number; x: number; y: number; startTime: number; button: string; duration: number }>>([]);
@@ -145,32 +157,45 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
   const webcamPosRef = useRef({ x: 0.85, y: 0.85 }); // bottom right
   const webcamRadiusRef = useRef(0.08); // 8% of width
 
+  // Cinematic Smooth Cursor Tracking refs
+  const targetCursorPosRef = useRef({ x: 0.5, y: 0.5 });
+  const currentCursorPosRef = useRef({ x: 0.5, y: 0.5 });
+  const hasReceivedCursorRef = useRef(false);
+  const cursorClickScaleRef = useRef(1.0);
+
+  // Live Keystroke Visualizer HUD refs
+  const activeKeystrokesRef = useRef<Array<{ id: number; combo: string; startTime: number; duration: number }>>([]);
+
   // Get available resolutions with entire screen preference by default
   const getConstraints = () => {
+    const opts = optionsRef.current;
     let width = 1920;
     let height = 1080;
     
-    if (options.resolution === '720p') {
+    if (opts.resolution === '720p') {
       width = 1280;
       height = 720;
-    } else if (options.resolution === '4k') {
+    } else if (opts.resolution === '4k') {
       width = 3840;
       height = 2160;
     }
 
+    const useCinematicCursor = opts.enableCinematicCursor !== false;
+
     return {
       video: {
-        displaySurface: options.captureSourcePreference === 'window' ? 'window' : 'monitor',
+        displaySurface: opts.captureSourcePreference === 'window' ? 'window' : 'monitor',
+        cursor: useCinematicCursor ? 'never' : 'always',
         width: { ideal: width },
         height: { ideal: height },
-        frameRate: { ideal: options.frameRate }
+        frameRate: { ideal: opts.frameRate }
       },
-      audio: options.recordSystemAudio ? {
+      audio: opts.recordSystemAudio ? {
         echoCancellation: false,
         noiseSuppression: false,
         autoGainControl: false
       } : false,
-      systemAudio: options.recordSystemAudio ? 'include' : 'exclude',
+      systemAudio: opts.recordSystemAudio ? 'include' : 'exclude',
       selfBrowserSurface: 'exclude',
       surfaceSwitching: 'include',
       preferCurrentTab: false,
@@ -359,7 +384,8 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       }
 
       // Draw Click Ripples if enabled
-      if (options.showMouseClicks && ripplesRef.current.length > 0) {
+      const opts = optionsRef.current;
+      if (opts.showMouseClicks && ripplesRef.current.length > 0) {
         const now = performance.now();
         ripplesRef.current = ripplesRef.current.filter(r => now - r.startTime < r.duration);
         
@@ -438,18 +464,33 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         ctx.lineWidth = canvas.width * stroke.width;
 
         if (stroke.tool === 'pen' || stroke.tool === 'highlighter') {
-          ctx.beginPath();
-          const p0 = mapCoord(stroke.points[0].x, stroke.points[0].y);
-          ctx.moveTo(p0.x, p0.y);
+          const pts = stroke.points;
+          const p0 = mapCoord(pts[0].x, pts[0].y);
 
-          if (stroke.points.length === 1) {
+          if (pts.length === 1) {
+            ctx.beginPath();
             ctx.arc(p0.x, p0.y, ctx.lineWidth / 2, 0, Math.PI * 2);
             ctx.fill();
+          } else if (pts.length === 2) {
+            ctx.beginPath();
+            ctx.moveTo(p0.x, p0.y);
+            const p1 = mapCoord(pts[1].x, pts[1].y);
+            ctx.lineTo(p1.x, p1.y);
+            ctx.stroke();
           } else {
-            for (let i = 1; i < stroke.points.length; i++) {
-              const pi = mapCoord(stroke.points[i].x, stroke.points[i].y);
-              ctx.lineTo(pi.x, pi.y);
+            // Smooth quadratic bezier curves through midpoints
+            ctx.beginPath();
+            ctx.moveTo(p0.x, p0.y);
+            for (let i = 1; i < pts.length - 1; i++) {
+              const pi = mapCoord(pts[i].x, pts[i].y);
+              const pNext = mapCoord(pts[i + 1].x, pts[i + 1].y);
+              const xc = (pi.x + pNext.x) / 2;
+              const yc = (pi.y + pNext.y) / 2;
+              ctx.quadraticCurveTo(pi.x, pi.y, xc, yc);
             }
+            const last = mapCoord(pts[pts.length - 1].x, pts[pts.length - 1].y);
+            const prev = mapCoord(pts[pts.length - 2].x, pts[pts.length - 2].y);
+            ctx.quadraticCurveTo(prev.x, prev.y, last.x, last.y);
             ctx.stroke();
           }
         } else if (stroke.tool === 'rect') {
@@ -487,7 +528,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       }
 
       // Draw Advanced Webcam Studio Overlay (Squircle, Circle, Rect, Neon Glow & Mirror Mode)
-      if (options.showWebcam && webcamVideoRef.current && webcamStreamRef.current && webcamVideoRef.current.readyState >= 2) {
+      if (opts.showWebcam && webcamVideoRef.current && webcamStreamRef.current) {
         const wVideo = webcamVideoRef.current.videoWidth;
         const hVideo = webcamVideoRef.current.videoHeight;
         
@@ -495,9 +536,9 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           const r = canvas.width * webcamRadiusRef.current;
           const x = canvas.width * webcamPosRef.current.x;
           const y = canvas.height * webcamPosRef.current.y;
-          const shape = options.webcamShape || 'circle';
-          const haloColor = options.webcamHaloColor || '#8b5cf6';
-          const isMirror = options.webcamMirrorMode !== false;
+          const shape = opts.webcamShape || 'circle';
+          const haloColor = opts.webcamHaloColor || '#8b5cf6';
+          const isMirror = opts.webcamMirrorMode !== false;
           
           let boxW = r * 2;
           let boxH = r * 2;
@@ -560,7 +601,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
             ctx.save();
             ctx.strokeStyle = haloColor;
             ctx.lineWidth = canvas.width * 0.003;
-            if (options.webcamGlow !== false) {
+            if (opts.webcamGlow !== false) {
               ctx.shadowColor = haloColor;
               ctx.shadowBlur = canvas.width * 0.012;
             }
@@ -584,6 +625,201 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
             ctx.stroke();
             ctx.restore();
           }
+        }
+      }
+
+      // 5. Draw Cinematic Smoothed Vector Cursor (Screen Studio Style)
+      if (opts.enableCinematicCursor !== false && hasReceivedCursorRef.current) {
+        // Calculate smoothing lerp rate
+        let smoothingRate = 0.28; // default 'cinematic'
+        if (opts.cursorSmoothingSpeed === 'smooth') smoothingRate = 0.16;
+        else if (opts.cursorSmoothingSpeed === 'direct') smoothingRate = 0.58;
+
+        currentCursorPosRef.current.x += (targetCursorPosRef.current.x - currentCursorPosRef.current.x) * smoothingRate;
+        currentCursorPosRef.current.y += (targetCursorPosRef.current.y - currentCursorPosRef.current.y) * smoothingRate;
+
+        // Animate click scale back to 1.0 (spring easing)
+        cursorClickScaleRef.current += (1.0 - cursorClickScaleRef.current) * 0.25;
+
+        // Compute screen coordinates taking current Zoom & Crop into account
+        let curX = currentCursorPosRef.current.x * canvas.width;
+        let curY = currentCursorPosRef.current.y * canvas.height;
+
+        if (zoom > 1.0) {
+          const cropW = 1.0 / zoom;
+          const cropH = 1.0 / zoom;
+          const maxCropX = 1.0 - cropW;
+          const maxCropY = 1.0 - cropH;
+          const cropX = Math.max(0, Math.min(maxCropX, centerX - cropW / 2));
+          const cropY = Math.max(0, Math.min(maxCropY, centerY - cropH / 2));
+
+          curX = ((currentCursorPosRef.current.x - cropX) / cropW) * canvas.width;
+          curY = ((currentCursorPosRef.current.y - cropY) / cropH) * canvas.height;
+        }
+
+        // Base pointer size scaled relative to canvas width
+        let sizeMultiplier = 1.35; // default 'large' for clear tutorials
+        if (opts.cursorSize === 'normal') sizeMultiplier = 1.0;
+        else if (opts.cursorSize === 'xlarge') sizeMultiplier = 1.7;
+
+        const baseScale = (canvas.width / 1920) * sizeMultiplier * cursorClickScaleRef.current;
+
+        ctx.save();
+        ctx.translate(curX, curY);
+        ctx.scale(baseScale, baseScale);
+
+        // Realistic soft drop shadow
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.42)';
+        ctx.shadowBlur = 10;
+        ctx.shadowOffsetX = 2.5;
+        ctx.shadowOffsetY = 4.5;
+
+        // Modern High-DPI Cursor Arrow Geometry (starts with tip at 0, 0)
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, 20);
+        ctx.lineTo(5.2, 16.2);
+        ctx.lineTo(9.5, 24);
+        ctx.lineTo(13.2, 22.2);
+        ctx.lineTo(8.8, 14.6);
+        ctx.lineTo(15.2, 14.6);
+        ctx.closePath();
+
+        // Dark charcoal interior
+        ctx.fillStyle = '#0f172a';
+        ctx.fill();
+
+        // Crisp white border
+        ctx.shadowColor = 'transparent'; // outline without duplicate shadow
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.8;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.stroke();
+
+        ctx.restore();
+      }
+
+      // 6. Draw Live Keystroke Visualizer HUD (Keycaps on Video)
+      if (opts.enableKeystrokeHUD !== false && activeKeystrokesRef.current.length > 0) {
+        const now = performance.now();
+        activeKeystrokesRef.current = activeKeystrokesRef.current.filter(k => now - k.startTime < k.duration);
+
+        if (activeKeystrokesRef.current.length > 0) {
+          const latest = activeKeystrokesRef.current[activeKeystrokesRef.current.length - 1];
+          const elapsed = now - latest.startTime;
+          const progress = elapsed / latest.duration;
+          
+          let alpha = 1.0;
+          if (progress > 0.75) {
+            alpha = Math.max(0, 1.0 - (progress - 0.75) / 0.25);
+          }
+
+          // Split combo into individual keys e.g. "Ctrl + Shift + P" -> ["Ctrl", "Shift", "P"]
+          const parts = latest.combo.split(' + ');
+          const fontSize = Math.max(14, canvas.width * 0.013);
+          const keyPadX = fontSize * 0.8;
+          const keyPadY = fontSize * 0.45;
+          const keyGap = fontSize * 0.5;
+
+          ctx.save();
+          ctx.font = `700 ${fontSize}px system-ui, -apple-system, sans-serif`;
+          ctx.globalAlpha = alpha;
+
+          // Measure total width
+          let totalWidth = 0;
+          const keyWidths: number[] = [];
+          for (const part of parts) {
+            const w = ctx.measureText(part).width + keyPadX * 2;
+            keyWidths.push(w);
+            totalWidth += w;
+          }
+          const plusWidth = ctx.measureText('+').width;
+          const numSeparators = Math.max(0, parts.length - 1);
+          totalWidth += numSeparators * (plusWidth + keyGap * 2);
+
+          const containerPadding = fontSize * 0.75;
+          const boxWidth = totalWidth + containerPadding * 2;
+          const boxHeight = fontSize + keyPadY * 2 + containerPadding * 1.2;
+
+          // Position calculation
+          const pos = opts.keystrokeHUDPosition || 'bottom-center';
+          let startX = (canvas.width - boxWidth) / 2;
+          let startY = canvas.height - boxHeight - canvas.height * 0.07;
+
+          if (pos === 'bottom-left') {
+            startX = canvas.width * 0.04;
+            startY = canvas.height - boxHeight - canvas.height * 0.07;
+          } else if (pos === 'bottom-right') {
+            startX = canvas.width - boxWidth - canvas.width * 0.04;
+            startY = canvas.height - boxHeight - canvas.height * 0.07;
+          } else if (pos === 'top-right') {
+            startX = canvas.width - boxWidth - canvas.width * 0.04;
+            startY = canvas.height * 0.06;
+          }
+
+          // Container background: Glassmorphic dark panel
+          ctx.save();
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+          ctx.shadowBlur = 18;
+          ctx.shadowOffsetY = 6;
+
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+          ctx.lineWidth = 1.5;
+
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(startX, startY, boxWidth, boxHeight, 14);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            ctx.fillRect(startX, startY, boxWidth, boxHeight);
+            ctx.strokeRect(startX, startY, boxWidth, boxHeight);
+          }
+          ctx.restore();
+
+          // Render each keycap badge inside container
+          let curItemX = startX + containerPadding;
+          const itemY = startY + (boxHeight - (fontSize + keyPadY * 2)) / 2;
+
+          for (let i = 0; i < parts.length; i++) {
+            const kw = keyWidths[i];
+            const kh = fontSize + keyPadY * 2;
+
+            // 3D Keycap background
+            ctx.fillStyle = 'rgba(30, 41, 59, 0.95)';
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+            ctx.lineWidth = 1.2;
+
+            if (ctx.roundRect) {
+              ctx.beginPath();
+              ctx.roundRect(curItemX, itemY, kw, kh, 6);
+              ctx.fill();
+              ctx.stroke();
+            } else {
+              ctx.fillRect(curItemX, itemY, kw, kh);
+              ctx.strokeRect(curItemX, itemY, kw, kh);
+            }
+
+            // Keycap text
+            ctx.fillStyle = '#f8fafc';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(parts[i], curItemX + kw / 2, itemY + kh / 2 + 1);
+
+            curItemX += kw;
+
+            // Render separator '+' if not last
+            if (i < parts.length - 1) {
+              curItemX += keyGap;
+              ctx.fillStyle = 'rgba(148, 163, 184, 0.75)';
+              ctx.fillText('+', curItemX + plusWidth / 2, itemY + kh / 2);
+              curItemX += plusWidth + keyGap;
+            }
+          }
+
+          ctx.restore();
         }
       }
     } catch (err) {
@@ -743,6 +979,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       }
 
       // 2. Initialize Web Audio API for mixing
+      const opts = optionsRef.current;
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       audioContextRef.current = audioContext;
       if (audioContext.state === 'suspended') {
@@ -758,7 +995,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       // Do NOT connect to audioContext.destination to avoid sending microphone input to speakers (echo feedback loop)
 
       // 3. Connect system audio if present in screen stream
-      if (options.recordSystemAudio && screenStream.getAudioTracks().length > 0) {
+      if (opts.recordSystemAudio && screenStream.getAudioTracks().length > 0) {
         const sysAudioTrack = screenStream.getAudioTracks()[0];
         const sysAudioStream = new MediaStream([sysAudioTrack]);
         const sysSource = audioContext.createMediaStreamSource(sysAudioStream);
@@ -768,18 +1005,18 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       }
 
       // 4. Connect microphone audio with DSP Filter Chain (Noise Suppression + Vocal Enhancer)
-      if (options.recordMic) {
+      if (opts.recordMic) {
         const micConstraints = {
-          audio: options.selectedMicId 
+          audio: opts.selectedMicId 
             ? { 
-                deviceId: options.selectedMicId, 
+                deviceId: opts.selectedMicId, 
                 echoCancellation: true, 
-                noiseSuppression: options.enableNoiseSuppression !== false, 
+                noiseSuppression: opts.enableNoiseSuppression !== false, 
                 autoGainControl: true 
               }
             : { 
                 echoCancellation: true, 
-                noiseSuppression: options.enableNoiseSuppression !== false, 
+                noiseSuppression: opts.enableNoiseSuppression !== false, 
                 autoGainControl: true 
               }
         };
@@ -791,7 +1028,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           micStream = await navigator.mediaDevices.getUserMedia({
             audio: { 
               echoCancellation: true, 
-              noiseSuppression: options.enableNoiseSuppression !== false, 
+              noiseSuppression: opts.enableNoiseSuppression !== false, 
               autoGainControl: true 
             }
           });
@@ -804,7 +1041,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         let lastNode: AudioNode = micSource;
 
         // DSP Filter 1: Anti-Rumble High-Pass Filter (Cuts 0-85Hz HVAC/Fan rumble and desk bumps)
-        if (options.enableNoiseSuppression !== false) {
+        if (opts.enableNoiseSuppression !== false) {
           const highPass = audioContext.createBiquadFilter();
           highPass.type = 'highpass';
           highPass.frequency.value = 85;
@@ -814,7 +1051,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         }
 
         // DSP Filter 2: Studio Vocal Presence & Clarity Boost
-        if (options.enableVocalEnhancer !== false) {
+        if (opts.enableVocalEnhancer !== false) {
           const vocalPresence = audioContext.createBiquadFilter();
           vocalPresence.type = 'peaking';
           vocalPresence.frequency.value = 3200;
@@ -836,7 +1073,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
 
         // DSP Filter 4: Output Gain Control
         const gainNode = audioContext.createGain();
-        gainNode.gain.value = options.micGain !== undefined ? options.micGain : 1.15;
+        gainNode.gain.value = opts.micGain !== undefined ? opts.micGain : 1.15;
         lastNode.connect(gainNode);
         lastNode = gainNode;
 
@@ -864,14 +1101,14 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       }
 
       // 5. Get webcam stream if enabled
-      if (options.showWebcam) {
+      if (opts.showWebcam) {
         try {
           let webcamStream: MediaStream | null = null;
           
-          if (options.selectedCamId) {
+          if (opts.selectedCamId) {
             try {
               webcamStream = await navigator.mediaDevices.getUserMedia({
-                video: { deviceId: { exact: options.selectedCamId }, width: { ideal: 640 }, height: { ideal: 480 } }
+                video: { deviceId: { exact: opts.selectedCamId }, width: { ideal: 640 }, height: { ideal: 480 } }
               });
             } catch (e) {
               console.warn('Preferred deviceId failed, falling back to general constraints:', e);
@@ -896,6 +1133,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           webcamVideo.srcObject = webcamStream;
           webcamVideo.crossOrigin = "anonymous";
           webcamVideo.muted = true;
+          webcamVideo.autoplay = true;
           webcamVideo.playsInline = true;
           webcamVideo.style.position = 'fixed';
           webcamVideo.style.top = '-9999px';
@@ -905,14 +1143,11 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           webcamVideo.style.opacity = '0.01';
           webcamVideo.style.pointerEvents = 'none';
           document.body.appendChild(webcamVideo);
+          webcamVideoRef.current = webcamVideo;
           try {
             await webcamVideo.play();
-            webcamVideoRef.current = webcamVideo;
           } catch (playErr) {
-            console.error('Failed to play webcam video element, stopping tracks:', playErr);
-            webcamStream.getTracks().forEach(t => t.stop());
-            webcamStreamRef.current = null;
-            webcamVideo.remove();
+            console.warn('Webcam initial play catch, continuing stream:', playErr);
           }
         } catch (err) {
           console.warn('Webcam access failed or denied:', err);
@@ -928,10 +1163,10 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       // Determine maximum resolution limits based on user configuration selection
       let maxW = 1920;
       let maxH = 1080;
-      if (options.resolution === '720p') {
+      if (opts.resolution === '720p') {
         maxW = 1280;
         maxH = 720;
-      } else if (options.resolution === '4k') {
+      } else if (opts.resolution === '4k') {
         maxW = 3840;
         maxH = 2160;
       }
@@ -998,16 +1233,16 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         drawComposite();
       };
       
-      worker.postMessage({ action: 'start', fps: options.frameRate });
+      worker.postMessage({ action: 'start', fps: opts.frameRate });
 
       // 7. Get video track for recording (always use composited canvas to capture Zoom, Spotlight, and Webcam)
-      const canvasStream = canvas.captureStream(options.frameRate);
+      const canvasStream = canvas.captureStream(opts.frameRate);
       const videoTrack = canvasStream.getVideoTracks()[0];
 
       // Combine video track and mixed audio tracks (only single composited video track)
       const outputTracks = [videoTrack];
       
-      if (options.recordMic || options.recordSystemAudio) {
+      if (opts.recordMic || opts.recordSystemAudio) {
         const mixedAudioTracks = audioDestination.stream.getAudioTracks();
         if (mixedAudioTracks.length > 0) {
           outputTracks.push(mixedAudioTracks[0]);
@@ -1017,7 +1252,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       const outputStream = new MediaStream(outputTracks);
 
       // 8. Create MediaRecorder
-      let selectedCodec: string = options.codec;
+      let selectedCodec: string = opts.codec;
       if (!MediaRecorder.isTypeSupported(selectedCodec)) {
         console.warn(`${selectedCodec} not supported, falling back to default webm`);
         selectedCodec = 'video/webm';
@@ -1025,7 +1260,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
 
       const mediaRecorder = new MediaRecorder(outputStream, {
         mimeType: selectedCodec,
-        videoBitsPerSecond: options.resolution === '4k' ? 16000000 : options.resolution === '1080p' ? 8000000 : 4000000
+        videoBitsPerSecond: opts.resolution === '4k' ? 16000000 : opts.resolution === '1080p' ? 8000000 : 4000000
       });
 
       mediaRecorderRef.current = mediaRecorder;
@@ -1184,6 +1419,32 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       animationFrameRef.current = null;
     }
 
+    // Force reset drawing mode and blur masks so they never leak into the next recording
+    isDrawingModeRef.current = false;
+    setIsDrawingMode(false);
+    freezeFrameRef.current = null;
+    clearDrawings();
+    clearBlurMasks();
+    try {
+      import('@tauri-apps/api/event').then(({ emit }) => {
+        emit('set-drawing-mode', { active: false });
+        emit('unfreeze-snapshot', {});
+        emit('clear-drawings', {});
+        emit('clear-blur-masks', {});
+      });
+    } catch {}
+
+    // Reset zoom state
+    if (isZoomedRef.current) {
+      isZoomedRef.current = false;
+      setIsZoomed(false);
+      try {
+        import('@tauri-apps/api/event').then(({ emit }) => {
+          emit('zoom-hud', { zoomed: false, factor: 1.0, showToast: false, showCorner: false }).catch(() => {});
+        });
+      } catch {}
+    }
+
     setIsRecording(false);
     setIsPaused(false);
     setMicLevel(0);
@@ -1260,6 +1521,40 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     webcamRadiusRef.current = Math.max(0.04, Math.min(0.15, percent));
   };
 
+  const playZoomSound = (isZoomingIn: boolean) => {
+    try {
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtxClass) return;
+      const ctx = new AudioCtxClass();
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      const now = ctx.currentTime;
+      const startFreq = isZoomingIn ? 520 : 780;
+      const endFreq = isZoomingIn ? 780 : 520;
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(startFreq, now);
+      osc.frequency.exponentialRampToValueAtTime(endFreq, now + 0.11);
+
+      gain.gain.setValueAtTime(0.06, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.13);
+
+      setTimeout(() => {
+        ctx.close().catch(() => {});
+      }, 200);
+    } catch (e) {}
+  };
+
   const toggleZoom = (targetX = 0.5, targetY = 0.5) => {
     if (autoZoomTimeoutRef.current) {
       clearTimeout(autoZoomTimeoutRef.current);
@@ -1267,7 +1562,10 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     }
     isAutoZoomingRef.current = false;
 
-    if (!isZoomedRef.current) {
+    const willZoom = !isZoomedRef.current;
+    const currentFactor = zoomFactorRef.current || 2.0;
+
+    if (willZoom) {
       // Zoom in centered on target cursor coordinates
       isZoomedRef.current = true;
       targetZoomCenterRef.current = { x: targetX, y: targetY };
@@ -1276,6 +1574,33 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       // Zoom out back to full screen
       isZoomedRef.current = false;
       setIsZoomed(false);
+    }
+
+    const opts = optionsRef.current;
+
+    // 1. Audio sound cue (default enabled)
+    if (opts.zoomSoundFeedback !== false) {
+      playZoomSound(willZoom);
+    }
+
+    // 2. Visual HUD Toast / Corner indicator on Overlay
+    const shouldShowToast = opts.zoomToastFeedback !== false;
+    const shouldShowCorner = opts.zoomCornerIndicator !== false;
+
+    if (shouldShowToast || shouldShowCorner) {
+      try {
+        import('@tauri-apps/api/core').then(({ invoke }) => {
+          invoke('show_overlay_hud').catch(() => {});
+        });
+        import('@tauri-apps/api/event').then(({ emit }) => {
+          emit('zoom-hud', { 
+            zoomed: willZoom, 
+            factor: currentFactor,
+            showToast: shouldShowToast,
+            showCorner: shouldShowCorner
+          }).catch(() => {});
+        });
+      } catch (e) {}
     }
   };
 
@@ -1372,16 +1697,24 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           try {
             const dataUrl = fc.toDataURL('image/jpeg', 0.92);
             const { emit } = await import('@tauri-apps/api/event');
+            await emit('set-drawing-mode', { active: true });
             await emit('freeze-snapshot', { image: dataUrl });
           } catch (e) {}
         }
       }
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('show_overlay');
+      } catch (e) {}
     } else {
       // Unfreeze
       freezeFrameRef.current = null;
       try {
         const { emit } = await import('@tauri-apps/api/event');
+        await emit('set-drawing-mode', { active: false });
         await emit('unfreeze-snapshot', {});
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('hide_overlay');
       } catch (e) {}
     }
   };
@@ -1437,11 +1770,25 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     }
   };
 
+  const startRecordingRef = useRef(startRecording);
+  startRecordingRef.current = startRecording;
+  const stopRecordingRef = useRef(stopRecording);
+  stopRecordingRef.current = stopRecording;
+  const pauseRecordingRef = useRef(pauseRecording);
+  pauseRecordingRef.current = pauseRecording;
+  const resumeRecordingRef = useRef(resumeRecording);
+  resumeRecordingRef.current = resumeRecording;
+
   // Native OS-wide Global Hotkeys, Click, and Draw listeners (emitted from Rust backend)
   useEffect(() => {
     let unlistenZoom: (() => void) | null = null;
     let unlistenClick: (() => void) | null = null;
+    let unlistenCursorMove: (() => void) | null = null;
+    let unlistenKeystroke: (() => void) | null = null;
     let unlistenDraw: (() => void) | null = null;
+    let unlistenExitDraw: (() => void) | null = null;
+    let unlistenSetDrawingMode: (() => void) | null = null;
+    let unlistenUnfreezeSnap: (() => void) | null = null;
     let unlistenDrawStart: (() => void) | null = null;
     let unlistenDrawPoint: (() => void) | null = null;
     let unlistenDrawEnd: (() => void) | null = null;
@@ -1457,18 +1804,18 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         
         unlistenRecord = await listen('toggle-record', () => {
           if (isRecordingRef.current || countdownRef.current !== null) {
-            stopRecording();
+            stopRecordingRef.current();
           } else {
-            startRecording();
+            startRecordingRef.current();
           }
         });
 
         unlistenPause = await listen('toggle-pause', () => {
           if (isRecordingRef.current) {
             if (isPausedRef.current) {
-              resumeRecording();
+              resumeRecordingRef.current();
             } else {
-              pauseRecording();
+              pauseRecordingRef.current();
             }
           }
         });
@@ -1481,8 +1828,55 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           }
         });
 
+        unlistenCursorMove = await listen<{ x: number; y: number }>('cursor-move', (event) => {
+          if (event.payload && typeof event.payload.x === 'number' && typeof event.payload.y === 'number') {
+            targetCursorPosRef.current = { x: event.payload.x, y: event.payload.y };
+            if (!hasReceivedCursorRef.current) {
+              currentCursorPosRef.current = { x: event.payload.x, y: event.payload.y };
+              hasReceivedCursorRef.current = true;
+            }
+          }
+        });
+
+        unlistenKeystroke = await listen<{ combo: string; key: string; modifiers: string[] }>('keystroke', (event) => {
+          if (event.payload?.combo) {
+            const combo = event.payload.combo;
+            // Never capture OpenPeek's own internal control hotkeys
+            if (
+              combo === 'Alt + R' || combo === 'F6' ||
+              combo === 'Alt + P' || combo === 'F7' ||
+              combo === 'Alt + Z' || combo === 'F9' ||
+              combo === 'Alt + D' || combo === 'F8' ||
+              combo === 'Alt + C' || combo === 'F10'
+            ) {
+              return;
+            }
+
+            const opts = optionsRef.current;
+            if (opts.enableKeystrokeHUD !== false) {
+              activeKeystrokesRef.current.push({
+                id: Math.random(),
+                combo,
+                startTime: performance.now(),
+                duration: 2200
+              });
+
+              // Emit to overlay window so user sees it live
+              try {
+                import('@tauri-apps/api/core').then(({ invoke }) => {
+                  invoke('show_overlay_hud').catch(() => {});
+                });
+                import('@tauri-apps/api/event').then(({ emit }) => {
+                  emit('keystroke-hud', { combo: event.payload.combo }).catch(() => {});
+                });
+              } catch {}
+            }
+          }
+        });
+
         unlistenClick = await listen<{ x: number; y: number; button: string }>('mouse-click', (event) => {
           if (event.payload && typeof event.payload.x === 'number' && typeof event.payload.y === 'number') {
+            cursorClickScaleRef.current = 0.88;
             addClickRipple(event.payload.x, event.payload.y, event.payload.button || 'left');
             triggerAutoZoom(event.payload.x, event.payload.y);
           }
@@ -1490,6 +1884,28 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
 
         unlistenDraw = await listen('toggle-draw', () => {
           toggleDrawingMode();
+        });
+
+        unlistenExitDraw = await listen('exit-draw', () => {
+          if (isDrawingModeRef.current) {
+            isDrawingModeRef.current = false;
+            setIsDrawingMode(false);
+            freezeFrameRef.current = null;
+          }
+        });
+
+        unlistenSetDrawingMode = await listen<{ active: boolean }>('set-drawing-mode', (event) => {
+          if (!event.payload?.active && isDrawingModeRef.current) {
+            isDrawingModeRef.current = false;
+            setIsDrawingMode(false);
+            freezeFrameRef.current = null;
+          }
+        });
+
+        unlistenUnfreezeSnap = await listen('unfreeze-snapshot', () => {
+          freezeFrameRef.current = null;
+          isDrawingModeRef.current = false;
+          setIsDrawingMode(false);
         });
 
         unlistenDrawStart = await listen<{ x: number; y: number }>('draw-start', (event) => {
@@ -1538,7 +1954,12 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     return () => {
       if (unlistenZoom) unlistenZoom();
       if (unlistenClick) unlistenClick();
+      if (unlistenCursorMove) unlistenCursorMove();
+      if (unlistenKeystroke) unlistenKeystroke();
       if (unlistenDraw) unlistenDraw();
+      if (unlistenExitDraw) unlistenExitDraw();
+      if (unlistenSetDrawingMode) unlistenSetDrawingMode();
+      if (unlistenUnfreezeSnap) unlistenUnfreezeSnap();
       if (unlistenDrawStart) unlistenDrawStart();
       if (unlistenDrawPoint) unlistenDrawPoint();
       if (unlistenDrawEnd) unlistenDrawEnd();
@@ -1577,6 +1998,9 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           pauseRecording();
         }
       } else if (isAltD) {
+        e.preventDefault();
+        toggleDrawingMode();
+      } else if (e.key === 'Escape' && isDrawingModeRef.current) {
         e.preventDefault();
         toggleDrawingMode();
       } else if (isAltC) {

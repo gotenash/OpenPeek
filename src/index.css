@@ -81,6 +81,16 @@ body {
   width: 100%;
 }
 
+/* Ensure Overlay Window is 100% transparent and does not cover the desktop */
+html.overlay-mode,
+body.overlay-mode,
+body.overlay-mode #root {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
 /* Glassmorphism Panel Utility */
 .glass-panel {
   background: var(--bg-card);
@@ -189,6 +199,25 @@ body {
   gap: 6px;
   padding-top: 12px;
   border-top: 1px solid var(--border-color);
+}
+
+.author-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  text-decoration: none;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.author-card:hover {
+  background: rgba(139, 92, 246, 0.12);
+  border-color: rgba(139, 92, 246, 0.4);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.15);
 }
 
 .version-info {
