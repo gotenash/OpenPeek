@@ -411,37 +411,33 @@ export function drawRedactionMasks(
  * Resolves accurate video duration even for WebM Blobs where duration is Infinity.
  */
 export async function getAccurateVideoDuration(videoEl: HTMLVideoElement, fallbackDuration?: number): Promise<number> {
-  if (fallbackDuration && fallbackDuration > 0 && isFinite(fallbackDuration)) {
-    return fallbackDuration;
-  }
   if (isFinite(videoEl.duration) && !isNaN(videoEl.duration) && videoEl.duration > 0) {
     return videoEl.duration;
   }
   return new Promise<number>((resolve) => {
     let resolved = false;
-    const timeout = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        resolve(fallbackDuration && fallbackDuration > 0 ? fallbackDuration : 10);
-      }
-    }, 1000);
-
-    const onSeeked = () => {
+    const finish = () => {
       if (resolved) return;
       resolved = true;
-      clearTimeout(timeout);
       videoEl.removeEventListener('seeked', onSeeked);
-      const dur = isFinite(videoEl.duration) && videoEl.duration > 0 ? videoEl.duration : (fallbackDuration || 10);
+      const measured = (isFinite(videoEl.duration) && videoEl.duration > 0)
+        ? videoEl.duration
+        : (isFinite(videoEl.currentTime) && videoEl.currentTime > 0
+            ? Math.max(videoEl.currentTime, fallbackDuration || 0)
+            : (fallbackDuration && fallbackDuration > 0 ? fallbackDuration : 10));
       videoEl.currentTime = 0;
-      resolve(dur);
+      resolve(measured);
     };
 
-    videoEl.addEventListener('seeked', onSeeked);
+    const onSeeked = () => finish();
+    const timeout = setTimeout(finish, 2000);
+
+    videoEl.addEventListener('seeked', onSeeked, { once: true });
     try {
       videoEl.currentTime = 1e101;
     } catch {
       clearTimeout(timeout);
-      resolve(fallbackDuration || 10);
+      finish();
     }
   });
 }

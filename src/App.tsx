@@ -13,7 +13,6 @@ import {
   Settings, 
   PenTool, 
   Globe, 
-  VideoOff,
   Clapperboard,
   Languages
 } from 'lucide-react';
@@ -53,7 +52,19 @@ function MainApp() {
     cursorSize: 'large',
     cursorSmoothingSpeed: 'cinematic',
     enableKeystrokeHUD: true,
-    keystrokeHUDPosition: 'bottom-center'
+    keystrokeHUDPosition: 'bottom-center',
+    selectedMonitorId: 'prompt'
+  });
+
+  // Load saved screen preference on startup
+  useState(() => {
+    import('@tauri-apps/api/core').then(({ invoke }) => {
+      invoke<string>('get_screen_preference').then((pref) => {
+        if (pref) {
+          setOptions(prev => ({ ...prev, selectedMonitorId: pref }));
+        }
+      }).catch(() => {});
+    }).catch(() => {});
   });
 
   // Instantiate recording engine hook
@@ -134,8 +145,20 @@ function MainApp() {
       <aside className="sidebar">
         <div>
           <div className="sidebar-header">
-            <div className="logo-icon">
-              {recorder.isRecording ? <Video size={20} /> : <VideoOff size={20} />}
+            <div className="logo-icon" style={{ position: 'relative', overflow: 'visible', background: 'transparent', boxShadow: 'none' }}>
+              <img src="/app-icon.png" alt="OpenPeek" style={{ width: 34, height: 34, objectFit: 'contain' }} />
+              {recorder.isRecording && (
+                <span style={{
+                  position: 'absolute',
+                  bottom: -2,
+                  right: -2,
+                  width: 10,
+                  height: 10,
+                  borderRadius: '50%',
+                  backgroundColor: '#ef4444',
+                  boxShadow: '0 0 8px #ef4444'
+                }} />
+              )}
             </div>
             <span className="logo-text">OpenPeek</span>
           </div>

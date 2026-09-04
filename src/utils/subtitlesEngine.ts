@@ -94,6 +94,89 @@ export const SUBTITLE_PRESETS: Record<SubtitleStyleKey, SubtitlePreset> = {
 
 /**
  * Resolves accurate video duration even for WebM Blobs where duration is Infinity.
+ * First tries Web Audio decoding for exact millisecond audio duration,
+ * then falls back to video element seeking (seeking to 1e101 to force Chromium to find the real end).
+ */
+export async function resolveAccurateBlobDuration(
+  videoBlob: Blob,
+  fallbackDuration?: number
+): Promise<number> {
+  // 1. Try Web Audio decode if blob has audio
+  try {
+    const arrayBuffer = await videoBlob.arrayBuffer();
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioCtx) {
+      const audioCtx = new AudioCtx();
+      try {
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+        if (audioBuffer && isFinite(audioBuffer.duration) && audioBuffer.duration > 0.5) {
+          return audioBuffer.duration;
+        }
+      } catch {
+        // Fall through to video element probing if no audio track or decode fails
+      } finally {
+        audioCtx.close().catch(() => {});
+      }
+    }
+  } catch (e) {
+    console.warn("AudioContext duration probe error:", e);
+  }
+
+  // 2. Probing via HTMLVideoElement
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    const videoUrl = URL.createObjectURL(videoBlob);
+    video.src = videoUrl;
+
+    let isDone = false;
+    const finish = (dur: number) => {
+      if (isDone) return;
+      isDone = true;
+      video.pause();
+      URL.revokeObjectURL(videoUrl);
+      const chosen = (isFinite(dur) && dur > 0.5)
+        ? Math.max(dur, fallbackDuration && isFinite(fallbackDuration) ? fallbackDuration : 0)
+        : (fallbackDuration && isFinite(fallbackDuration) && fallbackDuration > 0 ? fallbackDuration : 10);
+      resolve(chosen);
+    };
+
+    const timeout = setTimeout(() => {
+      const d = (isFinite(video.duration) && video.duration > 0)
+        ? video.duration
+        : (isFinite(video.currentTime) && video.currentTime > 0 ? video.currentTime : (fallbackDuration || 10));
+      finish(d);
+    }, 2500);
+
+    video.onloadedmetadata = () => {
+      if (isFinite(video.duration) && video.duration > 0) {
+        clearTimeout(timeout);
+        finish(video.duration);
+        return;
+      }
+      try {
+        video.currentTime = 1e101;
+      } catch {
+        clearTimeout(timeout);
+        finish(fallbackDuration || 10);
+      }
+    };
+
+    video.onseeked = () => {
+      clearTimeout(timeout);
+      const measured = (isFinite(video.duration) && video.duration > 0) ? video.duration : video.currentTime;
+      finish(measured);
+    };
+
+    video.onerror = () => {
+      clearTimeout(timeout);
+      finish(fallbackDuration || 10);
+    };
+  });
+}
+
+/**
+ * Resolves accurate video duration from an HTMLVideoElement without blindly trusting fallback.
  */
 export async function getAccurateVideoDuration(
   video: HTMLVideoElement,
@@ -101,9 +184,6 @@ export async function getAccurateVideoDuration(
 ): Promise<number> {
   if (isFinite(video.duration) && video.duration > 0) {
     return video.duration;
-  }
-  if (fallbackDuration && isFinite(fallbackDuration) && fallbackDuration > 0) {
-    return fallbackDuration;
   }
 
   return new Promise((resolve) => {
@@ -113,11 +193,13 @@ export async function getAccurateVideoDuration(
       resolved = true;
       video.removeEventListener('seeked', onSeeked);
       video.removeEventListener('timeupdate', onTimeUpdate);
-      const dur = isFinite(video.duration) && video.duration > 0
+      const measured = (isFinite(video.duration) && video.duration > 0)
         ? video.duration
-        : (isFinite(video.currentTime) && video.currentTime > 0 ? video.currentTime : (fallbackDuration || 10));
+        : (isFinite(video.currentTime) && video.currentTime > 0
+            ? Math.max(video.currentTime, fallbackDuration || 0)
+            : (fallbackDuration || 10));
       video.currentTime = 0;
-      resolve(dur);
+      resolve(measured);
     };
 
     const onSeeked = () => finish();
@@ -127,7 +209,7 @@ export async function getAccurateVideoDuration(
 
     video.addEventListener('seeked', onSeeked, { once: true });
     video.addEventListener('timeupdate', onTimeUpdate);
-    const timeout = setTimeout(finish, 1500);
+    const timeout = setTimeout(finish, 2000);
 
     try {
       video.currentTime = 1e101;
@@ -573,6 +655,10 @@ export async function detectSpeechSegments(
     const sampleRate = audioBuffer.sampleRate;
     audioCtx.close().catch(() => {});
 
+    const effectiveDuration = (audioBuffer && isFinite(audioBuffer.duration) && audioBuffer.duration > 0.5)
+      ? Math.max(audioBuffer.duration, knownDuration || 0)
+      : (knownDuration || 10);
+
     // Compute RMS in 100ms window chunks
     const windowSize = Math.floor(sampleRate * 0.1);
     const numWindows = Math.floor(channelData.length / windowSize);
@@ -609,7 +695,7 @@ export async function detectSpeechSegments(
           cues.push({
             id: `cue_${Date.now()}_${cues.length}`,
             startTime: Math.round(segStart * 10) / 10,
-            endTime: Math.round(Math.min(knownDuration, time + 0.1) * 10) / 10,
+            endTime: Math.round(Math.min(effectiveDuration, time + 0.1) * 10) / 10,
             text: `[Parole détectée ${cues.length + 1}]`
           });
         }
@@ -617,11 +703,11 @@ export async function detectSpeechSegments(
       }
     }
 
-    if (inSpeech && knownDuration - segStart >= 0.8) {
+    if (inSpeech && effectiveDuration - segStart >= 0.8) {
       cues.push({
         id: `cue_${Date.now()}_${cues.length}`,
         startTime: Math.round(segStart * 10) / 10,
-        endTime: Math.round(knownDuration * 10) / 10,
+        endTime: Math.round(effectiveDuration * 10) / 10,
         text: `[Parole détectée ${cues.length + 1}]`
       });
     }
@@ -755,7 +841,7 @@ export async function transcribeVideoLocally(
       };
     });
 
-    const duration = await getAccurateVideoDuration(video, knownDuration);
+    const duration = await resolveAccurateBlobDuration(videoBlob, knownDuration);
     const cues: SubtitleCue[] = [];
 
     // Check if Web Speech API is supported
@@ -1098,7 +1184,7 @@ export async function renderSubtitledVideo(
       };
     });
 
-    const duration = await getAccurateVideoDuration(video, knownDuration);
+    const duration = await resolveAccurateBlobDuration(videoBlob, knownDuration);
     const width = video.videoWidth || 1920;
     const height = video.videoHeight || 1080;
     const canvas = document.createElement('canvas');
@@ -1235,7 +1321,7 @@ export async function renderSubtitledGif(
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) throw new Error("Contexte Canvas indisponible");
 
-    const duration = await getAccurateVideoDuration(video, knownDuration);
+    const duration = await resolveAccurateBlobDuration(videoBlob, knownDuration);
     const frameInterval = 1 / fps;
     const timeStep = frameInterval * speed;
     const timestamps: number[] = [];

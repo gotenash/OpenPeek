@@ -1399,3 +1399,16 @@ body.overlay-mode #root {
   animation: clapper-snap 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
 }
 
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+

@@ -12,7 +12,7 @@
 [![Rust](https://img.shields.io/badge/Rust-black?style=for-the-badge&logo=rust&logoColor=E57324)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg?style=for-the-badge)](LICENSE)
 
-[**English**](#-english) • [**Français**](#-français)
+[**English**](#-english) • [**Français**](#-français) • [**Documentation Utilisateur**](DOC_UTILISATEUR.md) • [**Configuration Matérielle**](CONFIGURATION_MATERIELLE.md)
 
 </div>
 

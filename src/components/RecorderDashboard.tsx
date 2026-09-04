@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { RecorderOptions } from '../hooks/useRecorder';
 import { useI18n } from '../i18n/I18nContext';
 import { 
@@ -21,7 +21,8 @@ import {
   Eye,
   EyeOff,
   Wand2,
-  Keyboard
+  Keyboard,
+  Monitor
 } from 'lucide-react';
 
 interface RecorderDashboardProps {
@@ -32,6 +33,27 @@ interface RecorderDashboardProps {
 
 export function RecorderDashboard({ options, setOptions, recorder }: RecorderDashboardProps) {
   const { t } = useI18n();
+  const [systemMonitors, setSystemMonitors] = useState<Array<{ id: string; name: string; is_primary: boolean; width: number; height: number }>>([]);
+
+  useEffect(() => {
+    import('@tauri-apps/api/core').then(({ invoke }) => {
+      invoke<Array<{ id: string; name: string; is_primary: boolean; width: number; height: number }>>('get_system_monitors')
+        .then((monitors) => {
+          if (monitors && monitors.length > 0) {
+            setSystemMonitors(monitors);
+          }
+        })
+        .catch(() => {});
+    }).catch(() => {});
+  }, []);
+
+  const handleSelectMonitor = (pref: string) => {
+    setOptions(prev => ({ ...prev, selectedMonitorId: pref }));
+    import('@tauri-apps/api/core').then(({ invoke }) => {
+      invoke('save_screen_preference', { preference: pref }).catch(() => {});
+      invoke('set_active_capture_monitor', { monitorId: pref }).catch(() => {});
+    }).catch(() => {});
+  };
   const {
     isRecording,
     isPaused,
@@ -764,6 +786,130 @@ export function RecorderDashboard({ options, setOptions, recorder }: RecorderDas
               <Keyboard size={20} />
             </div>
             <div className="source-card-title">{t('dashboard.keystrokes')}</div>
+          </div>
+        </div>
+
+        {/* Screen / Monitor Selection (Below Sources de capture) */}
+        <div style={{
+          marginTop: '10px',
+          padding: '10px 12px',
+          borderRadius: '10px',
+          background: 'rgba(255, 255, 255, 0.02)',
+          border: '1px solid rgba(56, 189, 248, 0.22)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Monitor size={14} color="#38bdf8" />
+              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                {t('dashboard.screenSelectTitle')}
+              </span>
+            </div>
+            {systemMonitors.length > 1 && (
+              <span style={{
+                fontSize: '10px',
+                color: '#38bdf8',
+                background: 'rgba(56, 189, 248, 0.12)',
+                border: '1px solid rgba(56, 189, 248, 0.3)',
+                padding: '1px 6px',
+                borderRadius: '8px',
+                fontWeight: 600
+              }}>
+                {systemMonitors.length} {t('dashboard.detectedScreens')}
+              </span>
+            )}
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: systemMonitors.length >= 2 ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)',
+            gap: '6px'
+          }}>
+            {/* 1: Interactive Picker */}
+            <button
+              type="button"
+              disabled={isRecording || countdown !== null}
+              onClick={() => handleSelectMonitor('prompt')}
+              style={{
+                padding: '6px 4px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: (options.selectedMonitorId || 'prompt') === 'prompt' ? 700 : 500,
+                backgroundColor: (options.selectedMonitorId || 'prompt') === 'prompt' ? 'rgba(56, 189, 248, 0.25)' : 'rgba(255, 255, 255, 0.03)',
+                border: (options.selectedMonitorId || 'prompt') === 'prompt' ? '1px solid #38bdf8' : '1px solid var(--border-color)',
+                color: (options.selectedMonitorId || 'prompt') === 'prompt' ? '#38bdf8' : 'var(--text-secondary)',
+                cursor: (isRecording || countdown !== null) ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '2px',
+                transition: 'all 0.15s ease'
+              }}
+              title="Affiche le sélecteur natif avec miniatures en direct des écrans et fenêtres"
+            >
+              <span>{t('dashboard.screenSelectPrompt')}</span>
+              <span style={{ fontSize: '9px', opacity: 0.75 }}>{t('dashboard.screenSelectPromptDesc')}</span>
+            </button>
+
+            {/* 2: Screen 1 */}
+            <button
+              type="button"
+              disabled={isRecording || countdown !== null}
+              onClick={() => handleSelectMonitor('screen1')}
+              style={{
+                padding: '6px 4px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: options.selectedMonitorId === 'screen1' ? 700 : 500,
+                backgroundColor: options.selectedMonitorId === 'screen1' ? 'rgba(56, 189, 248, 0.25)' : 'rgba(255, 255, 255, 0.03)',
+                border: options.selectedMonitorId === 'screen1' ? '1px solid #38bdf8' : '1px solid var(--border-color)',
+                color: options.selectedMonitorId === 'screen1' ? '#38bdf8' : 'var(--text-secondary)',
+                cursor: (isRecording || countdown !== null) ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '2px',
+                transition: 'all 0.15s ease'
+              }}
+              title={systemMonitors[0] ? `Écran 1: ${systemMonitors[0].width}×${systemMonitors[0].height}` : 'Écran 1'}
+            >
+              <span>{t('dashboard.screenSelect1')}</span>
+              <span style={{ fontSize: '9px', opacity: 0.75 }}>
+                {systemMonitors[0] ? `${systemMonitors[0].width}×${systemMonitors[0].height}` : 'Principal'}
+              </span>
+            </button>
+
+            {/* 3: Screen 2 (if 2+ monitors) */}
+            {systemMonitors.length >= 2 && (
+              <button
+                type="button"
+                disabled={isRecording || countdown !== null}
+                onClick={() => handleSelectMonitor('screen2')}
+                style={{
+                  padding: '6px 4px',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontWeight: options.selectedMonitorId === 'screen2' ? 700 : 500,
+                  backgroundColor: options.selectedMonitorId === 'screen2' ? 'rgba(56, 189, 248, 0.25)' : 'rgba(255, 255, 255, 0.03)',
+                  border: options.selectedMonitorId === 'screen2' ? '1px solid #38bdf8' : '1px solid var(--border-color)',
+                  color: options.selectedMonitorId === 'screen2' ? '#38bdf8' : 'var(--text-secondary)',
+                  cursor: (isRecording || countdown !== null) ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '2px',
+                  transition: 'all 0.15s ease'
+                }}
+                title={systemMonitors[1] ? `Écran 2: ${systemMonitors[1].width}×${systemMonitors[1].height}` : 'Écran 2'}
+              >
+                <span>{t('dashboard.screenSelect2')}</span>
+                <span style={{ fontSize: '9px', opacity: 0.75 }}>
+                  {systemMonitors[1] ? `${systemMonitors[1].width}×${systemMonitors[1].height}` : 'Secondaire'}
+                </span>
+              </button>
+            )}
           </div>
         </div>
 

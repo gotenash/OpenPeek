@@ -31,7 +31,7 @@ import {
   type SubtitleOptions, 
   type WordAnimationType,
   SUBTITLE_PRESETS,
-  getAccurateVideoDuration,
+  resolveAccurateBlobDuration,
   extractAudioWavFromBlob,
   transcribeWithWhisper,
   detectSpeechSegments,
@@ -74,8 +74,12 @@ export function SubtitlesStudioModal({ video, onClose, onSavedToLibrary }: Subti
   const [isTranscribing, setIsTranscribing] = useState<boolean>(false);
   const [transcribeStatus, setTranscribeStatus] = useState<string>('');
   const [showWhisperConfig, setShowWhisperConfig] = useState<boolean>(false);
-  const [whisperApiKey, setWhisperApiKey] = useState<string>(() => localStorage.getItem('openpeek_whisper_key') || '');
   const [whisperService, setWhisperService] = useState<'groq' | 'openai'>(() => (localStorage.getItem('openpeek_whisper_service') as 'groq' | 'openai') || 'groq');
+  const [whisperApiKey, setWhisperApiKey] = useState<string>(() => {
+    const s = (localStorage.getItem('openpeek_whisper_service') as 'groq' | 'openai') || 'groq';
+    if (s === 'groq') return localStorage.getItem('openpeek_groq_key') || localStorage.getItem('openpeek_whisper_key') || '';
+    return localStorage.getItem('openpeek_openai_key') || localStorage.getItem('openpeek_whisper_key') || '';
+  });
 
   // Translation & Cleanup state
   const [showTranslateMenu, setShowTranslateMenu] = useState<boolean>(false);
@@ -99,6 +103,7 @@ export function SubtitlesStudioModal({ video, onClose, onSavedToLibrary }: Subti
 
   // Setup video element with accurate duration and audio playback
   useEffect(() => {
+    let isCancelled = false;
     const v = document.createElement('video');
     v.src = URL.createObjectURL(video.blob);
     v.muted = false;
@@ -109,13 +114,27 @@ export function SubtitlesStudioModal({ video, onClose, onSavedToLibrary }: Subti
     v.play().catch(() => {});
     videoRef.current = v;
 
-    getAccurateVideoDuration(v, video.duration).then((dur) => {
-      if (dur > 0) {
-        setVideoDuration(dur);
+    v.onloadedmetadata = () => {
+      if (isFinite(v.duration) && v.duration > 0.5) {
+        if (!isCancelled) setVideoDuration(prev => Math.max(prev, v.duration));
+      }
+    };
+
+    v.ontimeupdate = () => {
+      if (v.currentTime > 0) {
+        if (!isCancelled) setVideoDuration(prev => Math.max(prev, v.currentTime));
+      }
+    };
+
+    // Robust probing via Web Audio and video seek
+    resolveAccurateBlobDuration(video.blob, video.duration).then((dur) => {
+      if (!isCancelled && dur > 0.5) {
+        setVideoDuration(prev => Math.max(prev, dur));
       }
     });
 
     return () => {
+      isCancelled = true;
       v.pause();
       URL.revokeObjectURL(v.src);
       videoRef.current = null;
@@ -209,6 +228,11 @@ export function SubtitlesStudioModal({ video, onClose, onSavedToLibrary }: Subti
     try {
       localStorage.setItem('openpeek_whisper_key', whisperApiKey.trim());
       localStorage.setItem('openpeek_whisper_service', whisperService);
+      if (whisperService === 'groq') {
+        localStorage.setItem('openpeek_groq_key', whisperApiKey.trim());
+      } else {
+        localStorage.setItem('openpeek_openai_key', whisperApiKey.trim());
+      }
 
       const audioWav = await extractAudioWavFromBlob(video.blob);
       setTranscribeStatus(`Transcription Whisper (${whisperService.toUpperCase()})...`);
@@ -223,6 +247,10 @@ export function SubtitlesStudioModal({ video, onClose, onSavedToLibrary }: Subti
 
       if (generatedCues.length > 0) {
         setCues(generatedCues);
+        const maxCueEnd = Math.max(...generatedCues.map(c => c.endTime));
+        if (isFinite(maxCueEnd) && maxCueEnd > 0) {
+          setVideoDuration(prev => Math.max(prev, maxCueEnd));
+        }
         setShowWhisperConfig(false);
       } else {
         alert("Aucune parole détectée dans l'audio.");
@@ -242,6 +270,12 @@ export function SubtitlesStudioModal({ video, onClose, onSavedToLibrary }: Subti
     try {
       const generated = await detectSpeechSegments(video.blob, videoDuration);
       setCues(generated);
+      if (generated.length > 0) {
+        const maxCueEnd = Math.max(...generated.map(c => c.endTime));
+        if (isFinite(maxCueEnd) && maxCueEnd > 0) {
+          setVideoDuration(prev => Math.max(prev, maxCueEnd));
+        }
+      }
     } catch {
       alert("Erreur lors de l'analyse vocale.");
     } finally {
@@ -262,6 +296,12 @@ export function SubtitlesStudioModal({ video, onClose, onSavedToLibrary }: Subti
         (p) => setTranscribeStatus(`Progression locale : ${p}%`)
       );
       setCues(generatedCues);
+      if (generatedCues.length > 0) {
+        const maxCueEnd = Math.max(...generatedCues.map(c => c.endTime));
+        if (isFinite(maxCueEnd) && maxCueEnd > 0) {
+          setVideoDuration(prev => Math.max(prev, maxCueEnd));
+        }
+      }
     } catch {
       alert("Erreur lors de la transcription locale.");
     } finally {
@@ -313,6 +353,10 @@ export function SubtitlesStudioModal({ video, onClose, onSavedToLibrary }: Subti
 
       if (importedCues.length > 0) {
         setCues(importedCues);
+        const maxCueEnd = Math.max(...importedCues.map(c => c.endTime));
+        if (isFinite(maxCueEnd) && maxCueEnd > 0) {
+          setVideoDuration(prev => Math.max(prev, maxCueEnd));
+        }
       } else {
         alert("Impossible de lire les sous-titres depuis ce fichier.");
       }
@@ -808,7 +852,20 @@ export function SubtitlesStudioModal({ video, onClose, onSavedToLibrary }: Subti
                 <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Moteur :</span>
                 <select
                   value={whisperService}
-                  onChange={(e) => setWhisperService(e.target.value as 'groq' | 'openai')}
+                  onChange={(e) => {
+                    const newService = e.target.value as 'groq' | 'openai';
+                    setWhisperService(newService);
+                    localStorage.setItem('openpeek_whisper_service', newService);
+                    if (newService === 'groq') {
+                      const key = localStorage.getItem('openpeek_groq_key') || (whisperApiKey.startsWith('gsk_') ? whisperApiKey : '');
+                      setWhisperApiKey(key);
+                      if (key) localStorage.setItem('openpeek_whisper_key', key);
+                    } else {
+                      const key = localStorage.getItem('openpeek_openai_key') || (whisperApiKey.startsWith('sk-') ? whisperApiKey : '');
+                      setWhisperApiKey(key);
+                      if (key) localStorage.setItem('openpeek_whisper_key', key);
+                    }
+                  }}
                   className="form-input"
                   style={{ padding: '3px 8px', fontSize: '11px' }}
                 >
@@ -846,7 +903,7 @@ export function SubtitlesStudioModal({ video, onClose, onSavedToLibrary }: Subti
             </div>
 
             <p style={{ margin: 0, fontSize: '10px', color: 'var(--text-muted)' }}>
-              💡 Astuce : Avec Groq Cloud (gratuit sur console.groq.com), une vidéo de 3 minutes est transcrite avec horodatages précis en moins de 2 secondes.
+              💡 Astuce : Vous pouvez aussi configurer et tester vos clés globalement dans l'onglet <strong>Paramètres → IA & Clés API</strong>.
             </p>
           </div>
         )}

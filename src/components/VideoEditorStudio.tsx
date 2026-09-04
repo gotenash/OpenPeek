@@ -11,19 +11,23 @@ import {
 import { 
   type TimelineClip, 
   type TimelineTitle, 
+  type TimelineZoom,
   type EditorProject, 
   type BackgroundMusicTrack,
   AMBIENT_MUSIC_PRESETS,
   generateAmbientMusicBlob,
   calculateTotalDuration, 
   drawTitleOverlay,
-  drawFastForwardBadge
+  drawFastForwardBadge,
+  getActiveTimelineZoom,
+  applyTimelineZoomTransform
 } from '../utils/videoCompositor';
+import { resolveAccurateBlobDuration } from '../utils/subtitlesEngine';
 import { 
   Film, Plus, Trash2, Play, Pause, 
   Download, Sparkles, Type, Layers, Check, X, Save, FolderOpen, 
   FileText, Upload, RefreshCw, Music, Volume2, VolumeX, Headphones, Mic,
-  Scissors, FastForward
+  Scissors, FastForward, ZoomIn, Crosshair
 } from 'lucide-react';
 import { GifExportModal } from './GifExportModal';
 import { DeviceFrameModal } from './DeviceFrameModal';
@@ -52,9 +56,13 @@ export function VideoEditorStudio() {
   const [previewingAudioId, setPreviewingAudioId] = useState<string | null>(null);
   const [generatingPresetId, setGeneratingPresetId] = useState<string | null>(null);
 
+  // Export format preference
+  const [exportFormat, setExportFormat] = useState<'mp4' | 'webm'>('mp4');
+
   const [project, setProject] = useState<EditorProject>({
     clips: [],
     titles: [],
+    zooms: [],
     backgroundMusic: null
   });
 
@@ -62,6 +70,7 @@ export function VideoEditorStudio() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  const [exportStatus, setExportStatus] = useState<string>('');
   const [exportedBlob, setExportedBlob] = useState<Blob | null>(null);
 
   // Title modal state
@@ -76,6 +85,18 @@ export function VideoEditorStudio() {
     textColor: '#ffffff',
     bgColor: 'rgba(15, 23, 42, 0.85)',
     fontSize: 28
+  });
+
+  // Timeline Zoom modal state
+  const [isZoomModalOpen, setIsZoomModalOpen] = useState(false);
+  const [zoomForm, setZoomForm] = useState<TimelineZoom>({
+    id: '',
+    startTime: 0,
+    duration: 3,
+    scale: 2.0,
+    originX: 0.5,
+    originY: 0.5,
+    label: 'Zoom Focus'
   });
 
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -467,11 +488,13 @@ export function VideoEditorStudio() {
   // --- Clip Manipulation ---
 
   const addClipToTimeline = (video: SavedVideo) => {
+    const newClipId = `clip_${Date.now()}_${Math.random()}`;
+    const initialEndTrim = video.duration || 10;
     const newClip: TimelineClip = {
-      id: `clip_${Date.now()}_${Math.random()}`,
+      id: newClipId,
       video,
       startTrim: 0,
-      endTrim: video.duration || 10,
+      endTrim: initialEndTrim,
       transitionToNext: 'crossfade',
       transitionDuration: 1.0
     };
@@ -479,6 +502,16 @@ export function VideoEditorStudio() {
       ...prev,
       clips: [...prev.clips, newClip]
     }));
+
+    // Probe accurate duration in case metadata was throttled/inaccurate
+    resolveAccurateBlobDuration(video.blob, video.duration).then((dur) => {
+      if (dur > initialEndTrim) {
+        setProject((prev) => ({
+          ...prev,
+          clips: prev.clips.map((c) => (c.id === newClipId && c.endTrim === initialEndTrim) ? { ...c, endTrim: dur } : c)
+        }));
+      }
+    });
   };
 
   const removeClipFromTimeline = (id: string) => {
@@ -640,6 +673,32 @@ export function VideoEditorStudio() {
     }));
   };
 
+  // --- Timeline Zoom Manipulation ---
+
+  const handleSaveZoom = () => {
+    const newZoom: TimelineZoom = {
+      ...zoomForm,
+      id: zoomForm.id || `zoom_${Date.now()}`
+    };
+    setProject((prev) => {
+      const exists = (prev.zooms || []).some((z) => z.id === newZoom.id);
+      return {
+        ...prev,
+        zooms: exists
+          ? (prev.zooms || []).map((z) => z.id === newZoom.id ? newZoom : z)
+          : [...(prev.zooms || []), newZoom]
+      };
+    });
+    setIsZoomModalOpen(false);
+  };
+
+  const removeZoom = (id: string) => {
+    setProject((prev) => ({
+      ...prev,
+      zooms: (prev.zooms || []).filter((z) => z.id !== id)
+    }));
+  };
+
   // --- Playback Engine & Interactive Seek ---
 
   const togglePlay = () => {
@@ -700,6 +759,22 @@ export function VideoEditorStudio() {
 
       ctx.fillStyle = '#0a0a0a';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Auto-ducking preview: lower music volume when video clips are active
+      if (project.backgroundMusic && bgMusicAudioRef.current) {
+        const baseVol = project.backgroundMusic.volume ?? 0.15;
+        if (project.backgroundMusic.autoDucking !== false) {
+          const hasActiveClip = project.clips.length > 0;
+          const targetVol = hasActiveClip ? baseVol * (project.backgroundMusic.duckingLevel ?? 0.25) : baseVol;
+          bgMusicAudioRef.current.volume = bgMusicAudioRef.current.volume * 0.8 + targetVol * 0.2;
+        } else {
+          bgMusicAudioRef.current.volume = baseVol;
+        }
+      }
+
+      // Apply Timeline Zoom Transform if active at currentTime
+      const activeZoom = getActiveTimelineZoom(project.zooms, currentTime);
+      const isZoomed = applyTimelineZoomTransform(ctx, activeZoom, currentTime, canvas.width, canvas.height);
 
       let cumulative = 0;
       for (let i = 0; i < project.clips.length; i++) {
@@ -768,6 +843,11 @@ export function VideoEditorStudio() {
         cumulative += clipDuration - transDur;
       }
 
+      // Restore zoom transform before drawing text titles on top
+      if (isZoomed) {
+        ctx.restore();
+      }
+
       // Overlay active titles
       for (const title of project.titles) {
         if (currentTime >= title.startTime && currentTime <= title.startTime + title.duration) {
@@ -803,6 +883,10 @@ export function VideoEditorStudio() {
       return;
     }
 
+    // Apply Timeline Zoom Transform if active at preview time
+    const activeZoom = getActiveTimelineZoom(project.zooms, time);
+    const isZoomed = applyTimelineZoomTransform(ctx, activeZoom, time, canvas.width, canvas.height);
+
     let cumulative = 0;
     for (let i = 0; i < project.clips.length; i++) {
       const clip = project.clips[i];
@@ -831,6 +915,11 @@ export function VideoEditorStudio() {
       }
 
       cumulative += clipDuration - transDur;
+    }
+
+    // Restore zoom transform before drawing text titles
+    if (isZoomed) {
+      ctx.restore();
     }
 
     for (const title of project.titles) {
@@ -863,6 +952,9 @@ export function VideoEditorStudio() {
     let combinedStream: MediaStream = exportCanvas.captureStream(30);
     let exportAudioCtx: AudioContext | null = null;
     let bgExportAudioEl: HTMLAudioElement | null = null;
+    let bgGain: GainNode | null = null;
+    let voiceAnalyser: AnalyserNode | null = null;
+    let voiceDataArray: Uint8Array | null = null;
 
     try {
       exportAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -871,7 +963,11 @@ export function VideoEditorStudio() {
       }
       const dest = exportAudioCtx.createMediaStreamDestination();
 
-      // 1. Connect video clips audio
+      voiceAnalyser = exportAudioCtx.createAnalyser();
+      voiceAnalyser.fftSize = 256;
+      voiceDataArray = new Uint8Array(voiceAnalyser.frequencyBinCount);
+
+      // 1. Connect video clips audio to destination and speech analyser
       for (const clip of project.clips) {
         const videoEl = videoElementsRef.current.get(clip.id);
         if (videoEl) {
@@ -882,13 +978,14 @@ export function VideoEditorStudio() {
               (videoEl as any)._audioSourceNode = source;
             }
             source.connect(dest);
+            source.connect(voiceAnalyser);
           } catch (audioErr) {
             console.warn("Audio node connection:", audioErr);
           }
         }
       }
 
-      // 2. Connect Background Music with dedicated GainNode
+      // 2. Connect Background Music with dedicated GainNode for intelligent ducking
       if (project.backgroundMusic && project.backgroundMusic.blob) {
         bgExportAudioEl = document.createElement('audio');
         bgExportAudioEl.src = URL.createObjectURL(project.backgroundMusic.blob);
@@ -896,7 +993,7 @@ export function VideoEditorStudio() {
         
         try {
           const bgSource = exportAudioCtx.createMediaElementSource(bgExportAudioEl);
-          const bgGain = exportAudioCtx.createGain();
+          bgGain = exportAudioCtx.createGain();
           bgGain.gain.value = project.backgroundMusic.volume ?? 0.15;
           bgSource.connect(bgGain);
           bgGain.connect(dest);
@@ -916,10 +1013,15 @@ export function VideoEditorStudio() {
       console.warn("AudioContext initialization warning:", e);
     }
 
+    // Always record via WebM for 100% stability with Web Audio (prevents Chromium MP4 audio encoding crash)
+    const chosenMime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+      ? 'video/webm;codecs=vp9,opus'
+      : (MediaRecorder.isTypeSupported('video/webm;codecs=h264,opus')
+          ? 'video/webm;codecs=h264,opus'
+          : 'video/webm');
+
     const mediaRecorder = new MediaRecorder(combinedStream, {
-      mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-        ? 'video/webm;codecs=vp9,opus'
-        : 'video/webm'
+      mimeType: chosenMime
     });
 
     const chunks: Blob[] = [];
@@ -927,20 +1029,54 @@ export function VideoEditorStudio() {
       if (e.data && e.data.size > 0) chunks.push(e.data);
     };
 
+    let isFinished = false;
+    let exportTimerId: number | null = null;
+    let exportAnimId: number | null = null;
+
+    mediaRecorder.onerror = (event: any) => {
+      console.error("MediaRecorder export error:", event);
+      isFinished = true;
+      if (exportTimerId) clearTimeout(exportTimerId);
+      if (exportAnimId) cancelAnimationFrame(exportAnimId);
+      setIsExporting(false);
+      setExportStatus('');
+      alert("Une erreur est survenue lors de l'enregistrement du flux vidéo.");
+    };
+
     mediaRecorder.start(100);
 
     let exportTime = 0;
     let lastExportTime = performance.now();
 
+    const scheduleNextFrame = () => {
+      if (isFinished) return;
+      exportAnimId = requestAnimationFrame(exportLoop);
+      // Fallback timer so that if window is minimized / backgrounded, export continues smoothly and does not jump
+      exportTimerId = window.setTimeout(exportLoop, 35);
+    };
+
     const exportLoop = () => {
+      if (isFinished) return;
+      if (exportTimerId) {
+        clearTimeout(exportTimerId);
+        exportTimerId = null;
+      }
+      if (exportAnimId) {
+        cancelAnimationFrame(exportAnimId);
+        exportAnimId = null;
+      }
+
       const now = performance.now();
-      const dt = (now - lastExportTime) / 1000;
+      // Cap dt to avoid skipping entire video when app is backgrounded or tabbed away
+      const rawDt = (now - lastExportTime) / 1000;
+      const dt = Math.min(0.04, Math.max(0.005, rawDt));
       lastExportTime = now;
 
       exportTime += dt;
-      setExportProgress(Math.min(99, Math.round((exportTime / totalDuration) * 100)));
+      setExportProgress(Math.min(94, Math.round((exportTime / totalDuration) * 94)));
 
       if (exportTime >= totalDuration) {
+        isFinished = true;
         mediaRecorder.stop();
         videoElementsRef.current.forEach(v => v.pause());
         if (bgExportAudioEl) {
@@ -950,9 +1086,28 @@ export function VideoEditorStudio() {
         return;
       }
 
+      // Auto-ducking: dynamically lower background music volume during speech
+      if (bgGain && exportAudioCtx && project.backgroundMusic && project.backgroundMusic.autoDucking !== false && voiceAnalyser && voiceDataArray) {
+        voiceAnalyser.getByteFrequencyData(voiceDataArray as any);
+        let sum = 0;
+        for (let i = 0; i < voiceDataArray.length; i++) {
+          sum += voiceDataArray[i];
+        }
+        const avg = sum / voiceDataArray.length;
+        const baseVol = project.backgroundMusic.volume ?? 0.15;
+        const duckingMult = project.backgroundMusic.duckingLevel ?? 0.25;
+        const isVoiceActive = avg > 8; // detected speech threshold
+        const targetVol = isVoiceActive ? baseVol * duckingMult : baseVol;
+        bgGain.gain.setTargetAtTime(targetVol, exportAudioCtx.currentTime, 0.12);
+      }
+
       if (exportCtx) {
         exportCtx.fillStyle = '#0a0a0a';
         exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+
+        // Apply Timeline Zoom Transform in final render
+        const activeZoom = getActiveTimelineZoom(project.zooms, exportTime);
+        const isZoomed = applyTimelineZoomTransform(exportCtx, activeZoom, exportTime, exportCanvas.width, exportCanvas.height);
 
         let cumulative = 0;
         for (let i = 0; i < project.clips.length; i++) {
@@ -1020,6 +1175,11 @@ export function VideoEditorStudio() {
           cumulative += clipDuration - transDur;
         }
 
+        // Restore zoom transform before drawing text titles on top
+        if (isZoomed) {
+          exportCtx.restore();
+        }
+
         // Overlay titles
         for (const title of project.titles) {
           if (exportTime >= title.startTime && exportTime <= title.startTime + title.duration) {
@@ -1028,19 +1188,47 @@ export function VideoEditorStudio() {
         }
       }
 
-      requestAnimationFrame(exportLoop);
+      scheduleNextFrame();
     };
 
     mediaRecorder.onstop = async () => {
-      const finalBlob = new Blob(chunks, { type: 'video/webm' });
+      let finalBlob = new Blob(chunks, { type: 'video/webm' });
+      let outputExt: 'mp4' | 'webm' = 'webm';
+
+      if (exportFormat === 'mp4') {
+        try {
+          setExportStatus('Finalisation MP4...');
+          setExportProgress(96);
+          const { invoke } = await import('@tauri-apps/api/core');
+          const isFfmpeg = await invoke<boolean>('is_ffmpeg_available').catch(() => false);
+          if (isFfmpeg) {
+            setExportStatus('Conversion H.264 / AAC...');
+            setExportProgress(98);
+            const arrayBuf = await finalBlob.arrayBuffer();
+            const mp4Bytes = await invoke<number[]>('convert_webm_to_mp4', {
+              webmBytes: Array.from(new Uint8Array(arrayBuf))
+            });
+            finalBlob = new Blob([new Uint8Array(mp4Bytes)], { type: 'video/mp4' });
+            outputExt = 'mp4';
+          } else {
+            console.warn("FFmpeg non détecté, exportation WebM par défaut.");
+            outputExt = 'webm';
+          }
+        } catch (convErr) {
+          console.warn("Erreur lors de la conversion MP4 via FFmpeg:", convErr);
+          outputExt = 'webm';
+        }
+      }
+
       setExportedBlob(finalBlob);
       setIsExporting(false);
+      setExportStatus('');
       setExportProgress(100);
 
       // Save to IndexedDB
       await saveRecording({
         id: crypto.randomUUID ? crypto.randomUUID() : `montage_${Date.now()}`,
-        title: projectName || `Montage_${new Date().toLocaleDateString().replace(/\//g, '-')}`,
+        title: `${projectName || 'Montage'}.${outputExt}`,
         blob: finalBlob,
         thumbnail: exportCanvas.toDataURL('image/jpeg', 0.8),
         duration: Math.round(totalDuration),
@@ -1050,7 +1238,7 @@ export function VideoEditorStudio() {
       loadLibraryAndProjects();
     };
 
-    requestAnimationFrame(exportLoop);
+    scheduleNextFrame();
   };
 
   const handleDownloadExported = () => {
@@ -1058,7 +1246,9 @@ export function VideoEditorStudio() {
     const url = URL.createObjectURL(exportedBlob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'montage'}.webm`;
+    const isMp4 = exportedBlob.type.includes('mp4');
+    const ext = isMp4 ? 'mp4' : 'webm';
+    a.download = `${projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'montage'}.${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1440,7 +1630,7 @@ export function VideoEditorStudio() {
               </span>
             </div>
 
-            <div style={{ display: 'flex', gap: '6px' }}>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
               <button
                 className="btn-toolbar"
                 onClick={() => {
@@ -1448,7 +1638,7 @@ export function VideoEditorStudio() {
                     id: '',
                     text: 'Introduction',
                     subtitle: 'Bienvenue dans ce tutoriel',
-                    startTime: 0,
+                    startTime: Math.round(currentTime * 10) / 10,
                     duration: 3,
                     style: 'lowerthird',
                     textColor: '#ffffff',
@@ -1458,10 +1648,50 @@ export function VideoEditorStudio() {
                   setIsTitleModalOpen(true);
                 }}
                 style={{ fontSize: '11px', padding: '3px 8px' }}
+                title="Ajouter un titre ou un carton textuel"
               >
                 <Type size={12} color="#c084fc" />
                 <span>+ Titre</span>
               </button>
+
+              <button
+                className="btn-toolbar"
+                onClick={() => {
+                  setZoomForm({
+                    id: '',
+                    startTime: Math.round(currentTime * 10) / 10,
+                    duration: 3,
+                    scale: 2.0,
+                    originX: 0.5,
+                    originY: 0.5,
+                    label: 'Zoom Focus'
+                  });
+                  setIsZoomModalOpen(true);
+                }}
+                style={{ fontSize: '11px', padding: '3px 8px', color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+                title="Ajouter un zoom dynamique / focus sur une zone de l'écran"
+              >
+                <ZoomIn size={12} />
+                <span>+ Zoom</span>
+              </button>
+
+              <select
+                value={exportFormat}
+                onChange={(e) => setExportFormat(e.target.value as 'mp4' | 'webm')}
+                style={{
+                  fontSize: '11px',
+                  padding: '3px 6px',
+                  borderRadius: '4px',
+                  backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                  color: exportFormat === 'mp4' ? '#10b981' : '#38bdf8',
+                  border: '1px solid var(--border-color)',
+                  cursor: 'pointer'
+                }}
+                title="Format d'exportation : MP4 universel ou WebM"
+              >
+                <option value="mp4">Format MP4</option>
+                <option value="webm">Format WebM</option>
+              </select>
 
               <button
                 className="btn-primary"
@@ -1470,7 +1700,7 @@ export function VideoEditorStudio() {
                 style={{ fontSize: '11px', padding: '3px 10px' }}
               >
                 {isExporting ? <Sparkles size={12} className="spinning" /> : <Check size={12} />}
-                <span>{isExporting ? `Export (${exportProgress}%)` : 'Exporter Montage'}</span>
+                <span>{isExporting ? (exportStatus || `Export (${exportProgress}%)`) : `Exporter (${exportFormat.toUpperCase()})`}</span>
               </button>
 
               {exportedBlob && (
@@ -1537,7 +1767,7 @@ export function VideoEditorStudio() {
 
                   <button className="btn-secondary" onClick={handleDownloadExported} style={{ fontSize: '11px', padding: '3px 8px' }}>
                     <Download size={12} />
-                    <span>Télécharger</span>
+                    <span>Télécharger ({exportedBlob.type.includes('mp4') ? 'MP4' : 'WebM'})</span>
                   </button>
                 </>
               )}
@@ -1808,9 +2038,26 @@ export function VideoEditorStudio() {
                 />
               </div>
 
-              <span style={{ fontSize: '9px', color: '#10b981', marginLeft: 'auto' }}>
-                ✓ Mixage auto avec voix active
-              </span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: (project.backgroundMusic.autoDucking !== false) ? '#38bdf8' : 'var(--text-muted)', cursor: 'pointer', marginLeft: 'auto' }}>
+                <input
+                  type="checkbox"
+                  checked={project.backgroundMusic.autoDucking !== false}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setProject(prev => prev.backgroundMusic ? {
+                      ...prev,
+                      backgroundMusic: {
+                        ...prev.backgroundMusic,
+                        autoDucking: checked
+                      }
+                    } : prev);
+                  }}
+                  style={{ accentColor: '#38bdf8', cursor: 'pointer' }}
+                />
+                <span title="Baisse automatiquement la musique de fond à 20% dès qu'une personne parle ou qu'un son vidéo est présent">
+                  Auto-Ducking intelligent
+                </span>
+              </label>
             </div>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1837,6 +2084,48 @@ export function VideoEditorStudio() {
               </button>
             </div>
           )}
+        </div>
+
+        {/* Track 4: Zooms & Focus Zones */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'rgba(0,0,0,0.25)', padding: '5px 8px', borderRadius: '5px' }}>
+          <span style={{ fontSize: '10px', width: '90px', color: '#f59e0b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <ZoomIn size={11} />
+            Zooms ({(project.zooms || []).length})
+          </span>
+          <div style={{ display: 'flex', gap: '6px', flexGrow: 1, overflowX: 'auto', alignItems: 'center' }}>
+            {(project.zooms || []).map((z) => (
+              <div
+                key={z.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '3px 6px',
+                  backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                  border: '1px solid #f59e0b',
+                  borderRadius: '4px',
+                  fontSize: '10px'
+                }}
+              >
+                <Crosshair size={10} color="#f59e0b" />
+                <span style={{ fontWeight: 600, color: '#fde68a' }}>{z.scale}x</span>
+                <span style={{ color: 'var(--text-secondary)' }}>{z.label || 'Zoom'}</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: '9px' }}>({z.startTime}s - {Math.round((z.startTime + z.duration) * 10) / 10}s)</span>
+                <button
+                  style={{ background: 'transparent', border: 'none', color: '#fb7185', cursor: 'pointer', padding: 0 }}
+                  onClick={() => removeZoom(z.id)}
+                  title="Supprimer ce zoom"
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            ))}
+            {(!project.zooms || project.zooms.length === 0) && (
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                Aucun zoom actif. Cliquez sur « + Zoom » dans la barre de contrôle pour cibler une zone clé.
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1984,6 +2273,145 @@ export function VideoEditorStudio() {
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', marginTop: '6px' }}>
                 <button className="action-btn" onClick={() => setIsTitleModalOpen(false)}>Annuler</button>
                 <button className="btn-primary" onClick={handleSaveTitle}>Valider le titre</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Timeline Zoom Modal */}
+      {isZoomModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsZoomModalOpen(false)}>
+          <div className="glass-panel modal-content" style={{ maxWidth: '420px', padding: '16px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px', color: '#f59e0b' }}>
+                <ZoomIn size={16} />
+                Zoom Dynamique (Effet Studio)
+              </h3>
+              <button className="close-btn" onClick={() => setIsZoomModalOpen(false)}>
+                <X size={15} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '6px' }}>
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Nom / Annotation (optionnel)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={zoomForm.label || ''}
+                  onChange={(e) => setZoomForm({ ...zoomForm, label: e.target.value })}
+                  placeholder="ex: Focus sur le bouton, Détail du code..."
+                  style={{ width: '100%', fontSize: '12px', padding: '4px 6px' }}
+                />
+              </div>
+
+              {/* Zoom Scale Selector */}
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', display: 'block' }}>Facteur d'agrandissement</label>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {[1.5, 2.0, 2.5].map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setZoomForm({ ...zoomForm, scale: s })}
+                      style={{
+                        flex: 1,
+                        padding: '5px 8px',
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        backgroundColor: zoomForm.scale === s ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255,255,255,0.05)',
+                        border: zoomForm.scale === s ? '1px solid #f59e0b' : '1px solid var(--border-color)',
+                        color: zoomForm.scale === s ? '#fde68a' : 'var(--text-secondary)',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {s}x
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3x3 Target Zone Selector */}
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', display: 'block' }}>
+                  Zone cible du focus (Point d'ancrage)
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px', backgroundColor: 'rgba(0,0,0,0.3)', padding: '6px', borderRadius: '6px' }}>
+                  {[
+                    { name: 'Haut Gauche', x: 0.2, y: 0.2 },
+                    { name: 'Haut Centre', x: 0.5, y: 0.2 },
+                    { name: 'Haut Droite', x: 0.8, y: 0.2 },
+                    { name: 'Gauche', x: 0.2, y: 0.5 },
+                    { name: 'Centre', x: 0.5, y: 0.5 },
+                    { name: 'Droite', x: 0.8, y: 0.5 },
+                    { name: 'Bas Gauche', x: 0.2, y: 0.8 },
+                    { name: 'Bas Centre', x: 0.5, y: 0.8 },
+                    { name: 'Bas Droite', x: 0.8, y: 0.8 }
+                  ].map((pos) => {
+                    const isSelected = Math.abs(zoomForm.originX - pos.x) < 0.1 && Math.abs(zoomForm.originY - pos.y) < 0.1;
+                    return (
+                      <button
+                        key={pos.name}
+                        type="button"
+                        onClick={() => setZoomForm({ ...zoomForm, originX: pos.x, originY: pos.y })}
+                        style={{
+                          padding: '6px 4px',
+                          fontSize: '10px',
+                          borderRadius: '4px',
+                          backgroundColor: isSelected ? 'rgba(245, 158, 11, 0.3)' : 'rgba(255,255,255,0.03)',
+                          border: isSelected ? '1px solid #f59e0b' : '1px solid rgba(255,255,255,0.08)',
+                          color: isSelected ? '#fde68a' : 'var(--text-secondary)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: '2px'
+                        }}
+                      >
+                        <Crosshair size={10} color={isSelected ? '#f59e0b' : '#64748b'} />
+                        <span>{pos.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Time Range */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div>
+                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Début (s)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    className="form-input"
+                    value={zoomForm.startTime}
+                    onChange={(e) => setZoomForm({ ...zoomForm, startTime: parseFloat(e.target.value) || 0 })}
+                    style={{ width: '100%', fontSize: '11px', padding: '3px 5px' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Durée (s)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    step={0.5}
+                    className="form-input"
+                    value={zoomForm.duration}
+                    onChange={(e) => setZoomForm({ ...zoomForm, duration: parseFloat(e.target.value) || 3 })}
+                    style={{ width: '100%', fontSize: '11px', padding: '3px 5px' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', marginTop: '6px' }}>
+                <button className="action-btn" onClick={() => setIsZoomModalOpen(false)}>Annuler</button>
+                <button className="btn-primary" onClick={handleSaveZoom} style={{ backgroundColor: '#f59e0b', color: '#000000', fontWeight: 600 }}>
+                  Appliquer le Zoom
+                </button>
               </div>
             </div>
           </div>

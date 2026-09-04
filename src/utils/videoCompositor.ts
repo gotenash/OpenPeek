@@ -26,6 +26,16 @@ export interface TimelineTitle {
   fontSize: number;
 }
 
+export interface TimelineZoom {
+  id: string;
+  startTime: number; // position on master timeline in seconds
+  duration: number;  // duration on master timeline in seconds (e.g. 3s)
+  scale: number;     // e.g. 1.5, 2.0, 2.5
+  originX: number;   // 0.0 to 1.0 (horizontal center of zoom target)
+  originY: number;   // 0.0 to 1.0 (vertical center of zoom target)
+  label?: string;    // e.g. "Zoom Code", "Détail"
+}
+
 export interface BackgroundMusicTrack {
   id: string;
   title: string;
@@ -34,11 +44,14 @@ export interface BackgroundMusicTrack {
   volume: number; // 0.0 to 1.0, default 0.15 (15%)
   loop: boolean;
   isPreset?: boolean;
+  autoDucking?: boolean; // automatically lowers volume when speech is detected
+  duckingLevel?: number; // ducked volume multiplier (e.g. 0.25)
 }
 
 export interface EditorProject {
   clips: TimelineClip[];
   titles: TimelineTitle[];
+  zooms?: TimelineZoom[];
   backgroundMusic?: BackgroundMusicTrack | null;
 }
 
@@ -331,3 +344,57 @@ export function drawTitleOverlay(
 
   ctx.restore();
 }
+
+/**
+ * Returns the active timeline zoom if any at currentTime.
+ */
+export function getActiveTimelineZoom(zooms: TimelineZoom[] | undefined, currentTime: number): TimelineZoom | null {
+  if (!zooms || zooms.length === 0) return null;
+  return zooms.find(z => currentTime >= z.startTime && currentTime <= z.startTime + z.duration) || null;
+}
+
+/**
+ * Calculates current zoom progress (0 to 1 with smooth in/out easing) and applies the canvas 2D matrix transformation.
+ * Returns true if a zoom transformation was applied (meaning ctx.restore() should be called).
+ */
+export function applyTimelineZoomTransform(
+  ctx: CanvasRenderingContext2D,
+  zoom: TimelineZoom | null | undefined,
+  currentTime: number,
+  canvasW: number,
+  canvasH: number
+): boolean {
+  if (!zoom) return false;
+  const elapsed = currentTime - zoom.startTime;
+  if (elapsed < 0 || elapsed > zoom.duration) return false;
+
+  const transIn = Math.min(0.35, Math.max(0.1, zoom.duration / 3));
+  const transOut = Math.min(0.35, Math.max(0.1, zoom.duration / 3));
+
+  let progress = 1.0;
+  if (elapsed < transIn) {
+    const t = elapsed / transIn;
+    // Smooth sinusoidal ease-in
+    progress = 0.5 - 0.5 * Math.cos(Math.PI * t);
+  } else if (elapsed > zoom.duration - transOut) {
+    const t = (zoom.duration - elapsed) / transOut;
+    // Smooth sinusoidal ease-out
+    progress = 0.5 - 0.5 * Math.cos(Math.PI * t);
+  }
+
+  if (progress <= 0.001) return false;
+
+  const currentScale = 1.0 + (zoom.scale - 1.0) * progress;
+  const targetCenterX = zoom.originX * canvasW;
+  const targetCenterY = zoom.originY * canvasH;
+
+  const currentCenterX = (canvasW / 2) + (targetCenterX - (canvasW / 2)) * progress;
+  const currentCenterY = (canvasH / 2) + (targetCenterY - (canvasH / 2)) * progress;
+
+  ctx.save();
+  ctx.translate(canvasW / 2, canvasH / 2);
+  ctx.scale(currentScale, currentScale);
+  ctx.translate(-currentCenterX, -currentCenterY);
+  return true;
+}
+

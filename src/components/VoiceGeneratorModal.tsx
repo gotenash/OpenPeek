@@ -31,7 +31,7 @@ export function VoiceGeneratorModal({ initialText = '', onClose, onGenerated }: 
   const [speed, setSpeed] = useState<number>(1.0);
   
   // API Key for OpenAI
-  const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('openpeek_whisper_key') || '');
+  const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('openpeek_openai_key') || localStorage.getItem('openpeek_whisper_key') || '');
   const [showApiKeyInput, setShowApiKeyInput] = useState<boolean>(false);
 
   // Status & Audio Preview
@@ -56,7 +56,10 @@ export function VoiceGeneratorModal({ initialText = '', onClose, onGenerated }: 
 
   const handleSaveApiKey = (key: string) => {
     setApiKey(key);
-    localStorage.setItem('openpeek_whisper_key', key);
+    localStorage.setItem('openpeek_openai_key', key.trim());
+    if (localStorage.getItem('openpeek_whisper_service') === 'openai') {
+      localStorage.setItem('openpeek_whisper_key', key.trim());
+    }
   };
 
   // Preview directly in browser without downloading
@@ -284,15 +287,18 @@ export function VoiceGeneratorModal({ initialText = '', onClose, onGenerated }: 
             </div>
 
             {showApiKeyInput && (
-              <div style={{ display: 'flex', gap: '6px', backgroundColor: 'rgba(15, 23, 42, 0.8)', padding: '6px 8px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', backgroundColor: 'rgba(15, 23, 42, 0.8)', padding: '6px 8px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
                 <input
                   type="password"
                   value={apiKey}
                   onChange={(e) => handleSaveApiKey(e.target.value)}
                   placeholder="sk-..."
                   className="form-input"
-                  style={{ flexGrow: 1, fontSize: '11px', padding: '3px 6px' }}
+                  style={{ width: '100%', fontSize: '11px', padding: '3px 6px', boxSizing: 'border-box' }}
                 />
+                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                  💡 Vous pouvez aussi gérer vos clés dans <strong>Paramètres → IA & Clés API</strong>.
+                </span>
               </div>
             )}
           </div>

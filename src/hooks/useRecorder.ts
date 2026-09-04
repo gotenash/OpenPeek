@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { saveRecording, type SavedVideo } from '../utils/db';
+import { resolveAccurateBlobDuration } from '../utils/subtitlesEngine';
 
 export interface RecorderOptions {
   resolution: '1080p' | '720p' | '4k';
@@ -31,6 +32,7 @@ export interface RecorderOptions {
   cursorSmoothingSpeed?: 'smooth' | 'cinematic' | 'direct';
   enableKeystrokeHUD?: boolean;
   keystrokeHUDPosition?: 'bottom-center' | 'bottom-left' | 'bottom-right' | 'top-right';
+  selectedMonitorId?: string;
 }
 
 export type DrawTool = 'pen' | 'arrow' | 'rect' | 'highlighter';
@@ -58,6 +60,8 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
   const [isPaused, setIsPaused] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  const recordingStartTimeRef = useRef<number>(0);
+  const accumulatedTimeRef = useRef<number>(0);
   const [micLevel, setMicLevel] = useState(0);
   const [countdown, setCountdown] = useState<number | null>(null);
   const countdownTimerRef = useRef<number | null>(null);
@@ -232,6 +236,11 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       workerRef.current.terminate();
       workerRef.current = null;
     }
+    try {
+      import('@tauri-apps/api/core').then(({ invoke }) => {
+        invoke('set_active_capture_monitor', { monitorId: 'prompt' }).catch(() => {});
+      });
+    } catch {}
     if (screenStreamRef.current) {
       screenStreamRef.current.getTracks().forEach(t => t.stop());
       screenStreamRef.current = null;
@@ -496,9 +505,11 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         } else if (stroke.tool === 'rect') {
           const pStart = mapCoord(stroke.points[0].x, stroke.points[0].y);
           const pEnd = mapCoord(stroke.points[stroke.points.length - 1].x, stroke.points[stroke.points.length - 1].y);
-          const rw = pEnd.x - pStart.x;
-          const rh = pEnd.y - pStart.y;
-          ctx.strokeRect(pStart.x, pStart.y, rw, rh);
+          const minX = Math.min(pStart.x, pEnd.x);
+          const minY = Math.min(pStart.y, pEnd.y);
+          const rw = Math.abs(pEnd.x - pStart.x);
+          const rh = Math.abs(pEnd.y - pStart.y);
+          ctx.strokeRect(minX, minY, rw, rh);
         } else if (stroke.tool === 'arrow') {
           const pStart = mapCoord(stroke.points[0].x, stroke.points[0].y);
           const pEnd = mapCoord(stroke.points[stroke.points.length - 1].x, stroke.points[stroke.points.length - 1].y);
@@ -841,6 +852,11 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       const screenStream = await navigator.mediaDevices.getDisplayMedia(screenConstraints);
       screenStreamRef.current = screenStream;
 
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('set_active_capture_monitor', { monitorId: options.selectedMonitorId || 'prompt' });
+      } catch {}
+
       screenStream.getVideoTracks()[0].onended = () => {
         stopScreenPreview();
       };
@@ -948,6 +964,11 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         const screenConstraints = getConstraints();
         screenStream = await navigator.mediaDevices.getDisplayMedia(screenConstraints);
         screenStreamRef.current = screenStream;
+
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          await invoke('set_active_capture_monitor', { monitorId: options.selectedMonitorId || 'prompt' });
+        } catch {}
 
         screenStream.getVideoTracks()[0].onended = () => {
           stopRecording();
@@ -1324,15 +1345,21 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           setTimeout(() => {
             try {
               chunksRef.current = [];
+              recordingStartTimeRef.current = Date.now();
+              accumulatedTimeRef.current = 0;
+              setRecordingTime(0);
               // Start recording chunks every 1 second
               mediaRecorder.start(1000);
               setIsRecording(true);
               setIsPaused(false);
 
-              // Start Timer
+              // Start Timer using real wall-clock elapsed time (immune to Chromium background throttling)
               timerIntervalRef.current = window.setInterval(() => {
-                setRecordingTime(prev => prev + 1);
-              }, 1000);
+                if (recordingStartTimeRef.current > 0) {
+                  const elapsedMs = (Date.now() - recordingStartTimeRef.current) + accumulatedTimeRef.current;
+                  setRecordingTime(Math.max(1, Math.floor(elapsedMs / 1000)));
+                }
+              }, 500);
             } catch (recErr) {
               console.error('Failed to start MediaRecorder:', recErr);
               stopAllStreams();
@@ -1353,6 +1380,10 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.pause();
       setIsPaused(true);
+      if (recordingStartTimeRef.current > 0) {
+        accumulatedTimeRef.current += (Date.now() - recordingStartTimeRef.current);
+        recordingStartTimeRef.current = 0;
+      }
       if (timerIntervalRef.current) {
         clearInterval(timerIntervalRef.current);
         timerIntervalRef.current = null;
@@ -1372,9 +1403,13 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
       mediaRecorderRef.current.resume();
       setIsPaused(false);
+      recordingStartTimeRef.current = Date.now();
       timerIntervalRef.current = window.setInterval(() => {
-        setRecordingTime(prev => prev + 1);
-      }, 1000);
+        if (recordingStartTimeRef.current > 0) {
+          const elapsedMs = (Date.now() - recordingStartTimeRef.current) + accumulatedTimeRef.current;
+          setRecordingTime(Math.max(1, Math.floor(elapsedMs / 1000)));
+        }
+      }, 500);
       if (workerRef.current) {
         workerRef.current.postMessage({ action: 'start', fps: options.frameRate });
       }
@@ -1387,7 +1422,12 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
 
   // Stop recording
   const stopRecording = () => {
-    const recordedDuration = recordingTime;
+    let totalElapsedMs = accumulatedTimeRef.current;
+    if (recordingStartTimeRef.current > 0) {
+      totalElapsedMs += (Date.now() - recordingStartTimeRef.current);
+      recordingStartTimeRef.current = 0;
+    }
+    const recordedDuration = Math.max(recordingTime, Math.round(totalElapsedMs / 1000));
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
@@ -1445,6 +1485,9 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       } catch {}
     }
 
+    // Reset keystrokes
+    activeKeystrokesRef.current = [];
+
     setIsRecording(false);
     setIsPaused(false);
     setMicLevel(0);
@@ -1453,7 +1496,24 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
   // Finalize video generation, create thumbnail, and save to IndexedDB
   const finalizeRecording = async (canvasElement: HTMLCanvasElement) => {
     const videoBlob = new Blob(chunksRef.current, { type: mediaRecorderRef.current?.mimeType || 'video/webm' });
-    const finalDuration = recordingTime;
+    let finalDuration = recordingTime;
+    let totalElapsedMs = accumulatedTimeRef.current;
+    if (recordingStartTimeRef.current > 0) {
+      totalElapsedMs += (Date.now() - recordingStartTimeRef.current);
+    }
+    const elapsedSec = Math.round(totalElapsedMs / 1000);
+    if (elapsedSec > finalDuration) {
+      finalDuration = elapsedSec;
+    }
+
+    try {
+      const probed = await resolveAccurateBlobDuration(videoBlob, finalDuration);
+      if (isFinite(probed) && probed > 0.5) {
+        finalDuration = Math.round(probed);
+      }
+    } catch (e) {
+      console.warn('Could not probe accurate blob duration on finalize:', e);
+    }
     const finalSize = videoBlob.size;
     
     // Generate thumbnail from canvas
@@ -1699,6 +1759,11 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
             const { emit } = await import('@tauri-apps/api/event');
             await emit('set-drawing-mode', { active: true });
             await emit('freeze-snapshot', { image: dataUrl });
+            await emit('sync-draw-settings', {
+              tool: drawToolRef.current,
+              color: drawColorRef.current,
+              isAutoFade: isAutoFadeRef.current
+            });
           } catch (e) {}
         }
       }
@@ -1744,15 +1809,31 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     blurMasksRef.current = [];
   };
 
-  const startDrawingStroke = (x: number, y: number) => {
+  const startDrawingStroke = (
+    x: number, 
+    y: number, 
+    tool?: DrawTool, 
+    color?: string, 
+    width?: number, 
+    fadeDuration?: number | null
+  ) => {
+    const strokeTool = tool || drawToolRef.current;
+    const strokeColor = color || drawColorRef.current;
+    const strokeWidth = width !== undefined 
+      ? width 
+      : (strokeTool === 'highlighter' ? 0.022 : 0.0035);
+    const strokeFade = fadeDuration !== undefined 
+      ? fadeDuration 
+      : (isAutoFadeRef.current ? 3500 : null);
+
     const newStroke: DrawingStroke = {
       id: Math.random(),
-      tool: drawToolRef.current,
-      color: drawColorRef.current,
-      width: drawToolRef.current === 'highlighter' ? 0.022 : 0.0035,
+      tool: strokeTool,
+      color: strokeColor,
+      width: strokeWidth,
       points: [{ x, y }],
       startTime: performance.now(),
-      fadeDuration: isAutoFadeRef.current ? 3500 : null
+      fadeDuration: strokeFade
     };
     currentStrokeRef.current = newStroke;
   };
@@ -1792,6 +1873,10 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     let unlistenDrawStart: (() => void) | null = null;
     let unlistenDrawPoint: (() => void) | null = null;
     let unlistenDrawEnd: (() => void) | null = null;
+    let unlistenOverlayDrawStart: (() => void) | null = null;
+    let unlistenOverlayDrawPoint: (() => void) | null = null;
+    let unlistenOverlayDrawEnd: (() => void) | null = null;
+    let unlistenSyncSettings: (() => void) | null = null;
     let unlistenClear: (() => void) | null = null;
     let unlistenAddBlur: (() => void) | null = null;
     let unlistenClearBlur: (() => void) | null = null;
@@ -1839,6 +1924,11 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         });
 
         unlistenKeystroke = await listen<{ combo: string; key: string; modifiers: string[] }>('keystroke', (event) => {
+          // Ne capturer et n'afficher les raccourcis que pendant un enregistrement actif
+          if (!isRecordingRef.current || isPausedRef.current) {
+            return;
+          }
+
           if (event.payload?.combo) {
             const combo = event.payload.combo;
             // Never capture OpenPeek's own internal control hotkeys
@@ -1908,6 +1998,58 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           setIsDrawingMode(false);
         });
 
+        // Overlay drawing events (High-precision, includes exact tool, color, and coordinates)
+        unlistenOverlayDrawStart = await listen<{
+          x: number;
+          y: number;
+          tool?: DrawTool;
+          color?: string;
+          width?: number;
+          fadeDuration?: number | null;
+        }>('overlay-draw-start', (event) => {
+          if (event.payload && typeof event.payload.x === 'number') {
+            startDrawingStroke(
+              event.payload.x,
+              event.payload.y,
+              event.payload.tool,
+              event.payload.color,
+              event.payload.width,
+              event.payload.fadeDuration
+            );
+          }
+        });
+
+        unlistenOverlayDrawPoint = await listen<{ x: number; y: number }>('overlay-draw-point', (event) => {
+          if (event.payload && typeof event.payload.x === 'number') {
+            updateDrawingStroke(event.payload.x, event.payload.y);
+            if (isAutoZoomingRef.current && isZoomedRef.current) {
+              targetZoomCenterRef.current = { x: event.payload.x, y: event.payload.y };
+            }
+          }
+        });
+
+        unlistenOverlayDrawEnd = await listen('overlay-draw-end', () => {
+          endDrawingStroke();
+        });
+
+        // Bidirectional sync of tool, color, and auto-fade settings between overlay and recorder
+        unlistenSyncSettings = await listen<{ tool?: DrawTool; color?: string; isAutoFade?: boolean }>('sync-draw-settings', (event) => {
+          if (event.payload) {
+            if (event.payload.tool) {
+              setDrawTool(event.payload.tool);
+              drawToolRef.current = event.payload.tool;
+            }
+            if (event.payload.color) {
+              setDrawColor(event.payload.color);
+              drawColorRef.current = event.payload.color;
+            }
+            if (typeof event.payload.isAutoFade === 'boolean') {
+              setIsAutoFade(event.payload.isAutoFade);
+              isAutoFadeRef.current = event.payload.isAutoFade;
+            }
+          }
+        });
+
         unlistenDrawStart = await listen<{ x: number; y: number }>('draw-start', (event) => {
           if (isDrawingModeRef.current && event.payload && typeof event.payload.x === 'number') {
             startDrawingStroke(event.payload.x, event.payload.y);
@@ -1960,6 +2102,10 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       if (unlistenExitDraw) unlistenExitDraw();
       if (unlistenSetDrawingMode) unlistenSetDrawingMode();
       if (unlistenUnfreezeSnap) unlistenUnfreezeSnap();
+      if (unlistenOverlayDrawStart) unlistenOverlayDrawStart();
+      if (unlistenOverlayDrawPoint) unlistenOverlayDrawPoint();
+      if (unlistenOverlayDrawEnd) unlistenOverlayDrawEnd();
+      if (unlistenSyncSettings) unlistenSyncSettings();
       if (unlistenDrawStart) unlistenDrawStart();
       if (unlistenDrawPoint) unlistenDrawPoint();
       if (unlistenDrawEnd) unlistenDrawEnd();

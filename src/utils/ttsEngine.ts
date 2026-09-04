@@ -96,7 +96,7 @@ export async function generateSpeechAudio(text: string, options: TTSOptions): Pr
   }
 
   const speed = options.speed || 1.0;
-  const apiKey = options.apiKey || localStorage.getItem('openpeek_whisper_key') || '';
+  const apiKey = options.apiKey || localStorage.getItem('openpeek_openai_key') || localStorage.getItem('openpeek_whisper_key') || '';
 
   // 1. OpenAI TTS API (High Definition)
   if (options.provider === 'openai' && apiKey) {

@@ -38,10 +38,18 @@ export function OverlayCanvas() {
     let unlistenZoomHud: (() => void) | null = null;
     let unlistenKeystrokeHud: (() => void) | null = null;
     let unlistenClear: (() => void) | null = null;
+    let unlistenSyncSettings: (() => void) | null = null;
 
     async function setupListeners() {
       try {
         const { listen } = await import('@tauri-apps/api/event');
+        unlistenSyncSettings = await listen<{ tool?: DrawTool; color?: string; isAutoFade?: boolean }>('sync-draw-settings', (event) => {
+          if (event.payload) {
+            if (event.payload.tool) setTool(event.payload.tool);
+            if (event.payload.color) setColor(event.payload.color);
+            if (typeof event.payload.isAutoFade === 'boolean') setIsAutoFade(event.payload.isAutoFade);
+          }
+        });
         unlistenFreeze = await listen<{ image: string }>('freeze-snapshot', (event) => {
           if (event.payload?.image) {
             setSnapshotUrl(event.payload.image);
@@ -183,6 +191,7 @@ export function OverlayCanvas() {
       if (unlistenCut) unlistenCut();
       if (unlistenZoomHud) unlistenZoomHud();
       if (unlistenKeystrokeHud) unlistenKeystrokeHud();
+      if (unlistenSyncSettings) unlistenSyncSettings();
       if (zoomToastTimeoutRef.current) clearTimeout(zoomToastTimeoutRef.current);
       if (keystrokeToastTimeoutRef.current) clearTimeout(keystrokeToastTimeoutRef.current);
     };
@@ -332,10 +341,10 @@ export function OverlayCanvas() {
         } else if (stroke.tool === 'rect') {
           const pStart = stroke.points[0];
           const pEnd = stroke.points[stroke.points.length - 1];
-          const sx = pStart.x * canvas.width;
-          const sy = pStart.y * canvas.height;
-          const ex = pEnd.x * canvas.width;
-          const ey = pEnd.y * canvas.height;
+          const sx = Math.min(pStart.x, pEnd.x) * canvas.width;
+          const sy = Math.min(pStart.y, pEnd.y) * canvas.height;
+          const ex = Math.max(pStart.x, pEnd.x) * canvas.width;
+          const ey = Math.max(pStart.y, pEnd.y) * canvas.height;
           ctx.strokeRect(sx, sy, ex - sx, ey - sy);
         } else if (stroke.tool === 'arrow') {
           const pStart = stroke.points[0];
@@ -368,6 +377,31 @@ export function OverlayCanvas() {
     return () => cancelAnimationFrame(animationId);
   }, []);
 
+  const changeTool = async (newTool: DrawTool) => {
+    setTool(newTool);
+    try {
+      const { emit } = await import('@tauri-apps/api/event');
+      await emit('sync-draw-settings', { tool: newTool, color, isAutoFade });
+    } catch {}
+  };
+
+  const changeColor = async (newColor: string) => {
+    setColor(newColor);
+    try {
+      const { emit } = await import('@tauri-apps/api/event');
+      await emit('sync-draw-settings', { tool, color: newColor, isAutoFade });
+    } catch {}
+  };
+
+  const toggleAutoFade = async () => {
+    const next = !isAutoFade;
+    setIsAutoFade(next);
+    try {
+      const { emit } = await import('@tauri-apps/api/event');
+      await emit('sync-draw-settings', { tool, color, isAutoFade: next });
+    } catch {}
+  };
+
   const handleMouseDown = async (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (e.button !== 0) return; // Only left click
     isDrawingRef.current = true;
@@ -380,6 +414,20 @@ export function OverlayCanvas() {
       points: [{ x: nx, y: ny }],
       startTime: performance.now()
     };
+
+    const strokeWidth = tool === 'highlighter' ? 0.022 : 0.0035;
+    const fadeDuration = isAutoFade ? 3500 : null;
+    try {
+      const { emit } = await import('@tauri-apps/api/event');
+      await emit('overlay-draw-start', {
+        x: nx,
+        y: ny,
+        tool,
+        color,
+        width: strokeWidth,
+        fadeDuration
+      });
+    } catch {}
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -395,15 +443,21 @@ export function OverlayCanvas() {
     const dy = (ny - lastPt.y) * window.innerHeight;
     if (dx * dx + dy * dy < 4) return;
 
+    let ptX = nx;
+    let ptY = ny;
     if (isSmoothing && (currentStrokeRef.current.tool === 'pen' || currentStrokeRef.current.tool === 'highlighter')) {
       // Exponential moving average filter to soften hand jitter
       const smoothWeight = 0.72;
-      const smoothNx = lastPt.x + (nx - lastPt.x) * smoothWeight;
-      const smoothNy = lastPt.y + (ny - lastPt.y) * smoothWeight;
-      pts.push({ x: smoothNx, y: smoothNy });
-    } else {
-      pts.push({ x: nx, y: ny });
+      ptX = lastPt.x + (nx - lastPt.x) * smoothWeight;
+      ptY = lastPt.y + (ny - lastPt.y) * smoothWeight;
     }
+    pts.push({ x: ptX, y: ptY });
+
+    try {
+      import('@tauri-apps/api/event').then(({ emit }) => {
+        emit('overlay-draw-point', { x: ptX, y: ptY }).catch(() => {});
+      });
+    } catch {}
   };
 
   const handleMouseUp = () => {
@@ -418,6 +472,11 @@ export function OverlayCanvas() {
         fadeDuration: isAutoFade ? 3500 : null
       });
       currentStrokeRef.current = null;
+      try {
+        import('@tauri-apps/api/event').then(({ emit }) => {
+          emit('overlay-draw-end', {}).catch(() => {});
+        });
+      } catch {}
     }
     isDrawingRef.current = false;
   };
@@ -447,6 +506,7 @@ export function OverlayCanvas() {
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
           style={{
             position: 'absolute',
             inset: 0,
@@ -461,28 +521,33 @@ export function OverlayCanvas() {
 
       {/* Sleek Floating Palette for the Screen Overlay (Shown ONLY during drawing mode) */}
       {isInteractiveDrawing && (
-        <div style={{
-          position: 'fixed',
-          bottom: '24px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          padding: '8px 16px',
-          backgroundColor: 'rgba(15, 23, 42, 0.88)',
-          backdropFilter: 'blur(16px)',
-          borderRadius: '16px',
-          border: '1px solid rgba(255, 255, 255, 0.15)',
-          boxShadow: '0 20px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(139, 92, 246, 0.3)',
-          zIndex: 99999,
-          cursor: 'default',
-          pointerEvents: 'auto'
-        }}>
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          onMouseUp={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            padding: '8px 16px',
+            backgroundColor: 'rgba(15, 23, 42, 0.88)',
+            backdropFilter: 'blur(16px)',
+            borderRadius: '16px',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(139, 92, 246, 0.3)',
+            zIndex: 99999,
+            cursor: 'default',
+            pointerEvents: 'auto'
+          }}
+        >
         {/* Tools */}
         <div style={{ display: 'flex', gap: '4px' }}>
           <button
-            onClick={() => setTool('pen')}
+            onClick={() => changeTool('pen')}
             title="Feutre à main levée"
             style={{
               padding: '6px 10px',
@@ -498,7 +563,7 @@ export function OverlayCanvas() {
             <Pencil size={15} />
           </button>
           <button
-            onClick={() => setTool('arrow')}
+            onClick={() => changeTool('arrow')}
             title="Flèche"
             style={{
               padding: '6px 10px',
@@ -514,7 +579,7 @@ export function OverlayCanvas() {
             <ArrowUpRight size={15} />
           </button>
           <button
-            onClick={() => setTool('rect')}
+            onClick={() => changeTool('rect')}
             title="Rectangle"
             style={{
               padding: '6px 10px',
@@ -530,7 +595,7 @@ export function OverlayCanvas() {
             <Square size={15} />
           </button>
           <button
-            onClick={() => setTool('highlighter')}
+            onClick={() => changeTool('highlighter')}
             title="Surligneur"
             style={{
               padding: '6px 10px',
@@ -558,7 +623,7 @@ export function OverlayCanvas() {
           ].map((c) => (
             <button
               key={c.hex}
-              onClick={() => setColor(c.hex)}
+              onClick={() => changeColor(c.hex)}
               title={c.name}
               style={{
                 width: '18px',
@@ -576,7 +641,7 @@ export function OverlayCanvas() {
 
         {/* Auto-fade */}
         <button
-          onClick={() => setIsAutoFade(!isAutoFade)}
+          onClick={toggleAutoFade}
           title="Auto-fade 3s"
           style={{
             padding: '6px 10px',

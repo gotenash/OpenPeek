@@ -1,8 +1,116 @@
 // Prevents additional console window on Windows, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+
+#[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
+pub struct SystemMonitor {
+    pub id: String,
+    pub name: String,
+    pub is_primary: bool,
+    pub width: u32,
+    pub height: u32,
+    pub x: i32,
+    pub y: i32,
+    pub scale_factor: f64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ScreenPreference {
+    pub selected_screen: String, // "prompt" | "screen1" | "screen2"
+}
+
+static ACTIVE_MONITOR_TARGET: Mutex<Option<String>> = Mutex::new(None);
+
+fn get_config_file_path() -> std::path::PathBuf {
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        let dir = std::path::PathBuf::from(app_data).join("OpenPeek");
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join("screen_config.json")
+    } else {
+        std::path::PathBuf::from("screen_config.json")
+    }
+}
+
+fn load_screen_preference() -> String {
+    let path = get_config_file_path();
+    if let Ok(data) = std::fs::read_to_string(&path) {
+        if let Ok(pref) = serde_json::from_str::<ScreenPreference>(&data) {
+            return pref.selected_screen;
+        }
+    }
+    "prompt".to_string()
+}
+
+fn save_screen_preference_to_disk(pref: &str) {
+    let path = get_config_file_path();
+    let pref_obj = ScreenPreference {
+        selected_screen: pref.to_string(),
+    };
+    if let Ok(json) = serde_json::to_string_pretty(&pref_obj) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn enum_monitors_callback(
+    h_monitor: windows_sys::Win32::Graphics::Gdi::HMONITOR,
+    _: windows_sys::Win32::Graphics::Gdi::HDC,
+    _: *mut windows_sys::Win32::Foundation::RECT,
+    lparam: windows_sys::Win32::Foundation::LPARAM,
+) -> windows_sys::Win32::Foundation::BOOL {
+    let monitors = &mut *(lparam as *mut Vec<(i32, i32, i32, i32, bool, String)>);
+    let mut mi: windows_sys::Win32::Graphics::Gdi::MONITORINFOEXW = std::mem::zeroed();
+    mi.monitorInfo.cbSize = std::mem::size_of::<windows_sys::Win32::Graphics::Gdi::MONITORINFOEXW>() as u32;
+    if windows_sys::Win32::Graphics::Gdi::GetMonitorInfoW(h_monitor, &mut mi as *mut _ as *mut _) != 0 {
+        let is_primary = (mi.monitorInfo.dwFlags & 1) != 0;
+        let name_len = mi.szDevice.iter().position(|&c| c == 0).unwrap_or(mi.szDevice.len());
+        let dev_name = String::from_utf16_lossy(&mi.szDevice[..name_len]);
+        monitors.push((
+            mi.monitorInfo.rcMonitor.left,
+            mi.monitorInfo.rcMonitor.top,
+            mi.monitorInfo.rcMonitor.right - mi.monitorInfo.rcMonitor.left,
+            mi.monitorInfo.rcMonitor.bottom - mi.monitorInfo.rcMonitor.top,
+            is_primary,
+            dev_name,
+        ));
+    }
+    1
+}
+
+#[cfg(windows)]
+fn get_monitor_rect_by_id(target_id: &str) -> Option<(f64, f64, f64, f64)> {
+    use windows_sys::Win32::Graphics::Gdi::EnumDisplayMonitors;
+    unsafe {
+        let mut monitors: Vec<(i32, i32, i32, i32, bool, String)> = Vec::new();
+        EnumDisplayMonitors(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            Some(enum_monitors_callback),
+            &mut monitors as *mut _ as isize,
+        );
+
+        let target_lower = target_id.to_lowercase();
+        if target_lower == "screen1" || target_lower.contains("display1") {
+            if let Some(m) = monitors.get(0) {
+                return Some((m.0 as f64, m.1 as f64, m.2 as f64, m.3 as f64));
+            }
+        } else if target_lower == "screen2" || target_lower.contains("display2") {
+            if let Some(m) = monitors.get(1) {
+                return Some((m.0 as f64, m.1 as f64, m.2 as f64, m.3 as f64));
+            }
+        } else {
+            for m in &monitors {
+                if m.5.to_lowercase().contains(&target_lower) {
+                    return Some((m.0 as f64, m.1 as f64, m.2 as f64, m.3 as f64));
+                }
+            }
+        }
+    }
+    None
+}
 
 #[derive(Clone, serde::Serialize)]
 struct CursorCoordinates {
@@ -19,7 +127,28 @@ fn get_system_cursor_position() -> CursorCoordinates {
         let mut pt = POINT { x: 0, y: 0 };
         GetCursorPos(&mut pt);
 
-        // Locate the exact monitor containing the cursor
+        // Check if a specific monitor target is active
+        let target = ACTIVE_MONITOR_TARGET.lock().ok().and_then(|guard| guard.clone());
+        if let Some(target_id) = target {
+            if let Some(rect) = get_monitor_rect_by_id(&target_id) {
+                let (left, top, mon_w, mon_h) = rect;
+                if mon_w > 0.0 && mon_h > 0.0 {
+                    let in_bounds = (pt.x as f64) >= left && (pt.x as f64) <= (left + mon_w) &&
+                                    (pt.y as f64) >= top && (pt.y as f64) <= (top + mon_h);
+                    if in_bounds {
+                        return CursorCoordinates {
+                            x: ((pt.x as f64 - left) / mon_w).clamp(0.0, 1.0),
+                            y: ((pt.y as f64 - top) / mon_h).clamp(0.0, 1.0),
+                        };
+                    } else {
+                        // Mouse is on another monitor: place cursor off-screen so it does not ghost
+                        return CursorCoordinates { x: -1.0, y: -1.0 };
+                    }
+                }
+            }
+        }
+
+        // Default: locate the exact monitor containing the cursor
         let h_monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
         let mut mi: MONITORINFO = std::mem::zeroed();
         mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
@@ -85,6 +214,21 @@ fn position_overlay_to_active_monitor(overlay: &tauri::WebviewWindow) {
         use windows_sys::Win32::Foundation::POINT;
         use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST};
         unsafe {
+            let target = ACTIVE_MONITOR_TARGET.lock().ok().and_then(|guard| guard.clone());
+            if let Some(target_id) = target {
+                if let Some((left, top, width, height)) = get_monitor_rect_by_id(&target_id) {
+                    let _ = overlay.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                        x: left as i32,
+                        y: top as i32,
+                    }));
+                    let _ = overlay.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                        width: width as u32,
+                        height: height as u32,
+                    }));
+                    return;
+                }
+            }
+
             let mut pt = POINT { x: 0, y: 0 };
             windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt);
             let h_mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
@@ -101,6 +245,50 @@ fn position_overlay_to_active_monitor(overlay: &tauri::WebviewWindow) {
                 }));
             }
         }
+    }
+}
+
+#[tauri::command]
+fn get_system_monitors(app: tauri::AppHandle) -> Vec<SystemMonitor> {
+    let mut result = Vec::new();
+    let primary_name = app.primary_monitor().ok().flatten().and_then(|m| m.name().map(|s| s.to_string()));
+    
+    if let Ok(monitors) = app.available_monitors() {
+        for (index, m) in monitors.into_iter().enumerate() {
+            let name_str = m.name().map(|s| s.to_string()).unwrap_or_else(|| format!("Display {}", index + 1));
+            let is_prim = primary_name.as_ref().map(|p| p == &name_str).unwrap_or(index == 0);
+            result.push(SystemMonitor {
+                id: format!("screen{}", index + 1),
+                name: name_str,
+                is_primary: is_prim,
+                width: m.size().width,
+                height: m.size().height,
+                x: m.position().x,
+                y: m.position().y,
+                scale_factor: m.scale_factor(),
+            });
+        }
+    }
+    result
+}
+
+#[tauri::command]
+fn get_screen_preference() -> String {
+    load_screen_preference()
+}
+
+#[tauri::command]
+fn save_screen_preference(preference: String) {
+    save_screen_preference_to_disk(&preference);
+}
+
+#[tauri::command]
+fn set_active_capture_monitor(monitor_id: String) {
+    let mut lock = ACTIVE_MONITOR_TARGET.lock().unwrap();
+    if monitor_id == "prompt" || monitor_id.is_empty() {
+        *lock = None;
+    } else {
+        *lock = Some(monitor_id);
     }
 }
 
@@ -143,12 +331,155 @@ fn toggle_overlay(app: tauri::AppHandle) {
     }
 }
 
+fn find_ffmpeg_executable() -> Option<std::path::PathBuf> {
+    // 1. Check if ffmpeg is in PATH
+    let mut check_cmd = std::process::Command::new("ffmpeg");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        check_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    check_cmd.arg("-version");
+
+    if let Ok(output) = check_cmd.output() {
+        if output.status.success() {
+            return Some(std::path::PathBuf::from("ffmpeg"));
+        }
+    }
+
+    // 2. On Windows, search WinGet packages directory
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let winget_dir = std::path::PathBuf::from(local_app_data).join("Microsoft").join("WinGet").join("Packages");
+        if winget_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(winget_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let candidate1 = path.join("ffmpeg.exe");
+                        if candidate1.exists() {
+                            return Some(candidate1);
+                        }
+                        if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                            for sub_entry in sub_entries.flatten() {
+                                let sub_path = sub_entry.path();
+                                let candidate2 = sub_path.join("bin").join("ffmpeg.exe");
+                                if candidate2.exists() {
+                                    return Some(candidate2);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Common installation paths
+    for prefix in &["C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe", "C:\\ffmpeg\\bin\\ffmpeg.exe"] {
+        let p = std::path::PathBuf::from(prefix);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    None
+}
+
+#[tauri::command]
+fn is_ffmpeg_available() -> bool {
+    find_ffmpeg_executable().is_some()
+}
+
+#[tauri::command]
+async fn convert_webm_to_mp4(webm_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+    let ffmpeg_cmd = find_ffmpeg_executable().ok_or_else(|| {
+        "FFmpeg n'a pas été détecté sur votre ordinateur.".to_string()
+    })?;
+
+    let temp_dir = std::env::temp_dir();
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(12345);
+
+    let input_path = temp_dir.join(format!("openpeek_render_{}.webm", unique_id));
+    let output_path = temp_dir.join(format!("openpeek_render_{}.mp4", unique_id));
+
+    std::fs::write(&input_path, &webm_bytes)
+        .map_err(|e| format!("Impossible d'écrire le fichier WebM temporaire: {}", e))?;
+
+    let mut cmd = std::process::Command::new(ffmpeg_cmd);
+    cmd.args(&[
+        "-y",
+        "-i",
+        input_path.to_str().unwrap(),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-crf",
+        "22",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-movflags",
+        "+faststart",
+        output_path.to_str().unwrap(),
+    ]);
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = cmd.output().map_err(|e| {
+        let _ = std::fs::remove_file(&input_path);
+        format!("Erreur lors de l'exécution de FFmpeg: {}", e)
+    })?;
+
+    let _ = std::fs::remove_file(&input_path);
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let _ = std::fs::remove_file(&output_path);
+        return Err(format!("Échec de l'encodage FFmpeg: {}", stderr));
+    }
+
+    let mp4_bytes = std::fs::read(&output_path).map_err(|e| {
+        let _ = std::fs::remove_file(&output_path);
+        format!("Impossible de lire le fichier MP4 résultant: {}", e)
+    })?;
+
+    let _ = std::fs::remove_file(&output_path);
+
+    Ok(mp4_bytes)
+}
+
 fn main() {
-    // Disable WebView2 background suspension and auto-select desktop screen capture to bypass prompt
-    std::env::set_var(
-        "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-        "--autoplay-policy=no-user-gesture-required --enable-usermedia-screen-capturing --auto-select-desktop-capture-source=\"Écran complet\" --auto-select-desktop-capture-source=\"Entire screen\" --auto-select-desktop-capture-source=\"Screen\" --use-fake-ui-for-media-stream --disable-features=CalculateWindowOcclusion --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding"
+    let screen_pref = load_screen_preference();
+    let mut args = String::from(
+        "--autoplay-policy=no-user-gesture-required --enable-usermedia-screen-capturing --disable-features=CalculateWindowOcclusion --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding"
     );
+
+    match screen_pref.as_str() {
+        "screen2" => {
+            args.push_str(" --auto-select-desktop-capture-source=\"2\"");
+        }
+        "screen1" => {
+            args.push_str(" --auto-select-desktop-capture-source=\"1\"");
+        }
+        _ => {
+            // "prompt": no auto-selection flag passed, native picker opens cleanly with all monitors!
+        }
+    }
+
+    std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", args);
 
     tauri::Builder::default()
         .plugin(
@@ -181,7 +512,18 @@ fn main() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![show_overlay, hide_overlay, toggle_overlay, show_overlay_hud])
+        .invoke_handler(tauri::generate_handler![
+            show_overlay,
+            hide_overlay,
+            toggle_overlay,
+            show_overlay_hud,
+            get_system_monitors,
+            get_screen_preference,
+            save_screen_preference,
+            set_active_capture_monitor,
+            is_ffmpeg_available,
+            convert_webm_to_mp4
+        ])
         .setup(|app| {
             if let Some(main_window) = app.get_webview_window("main") {
                 let _ = main_window.maximize();
@@ -319,19 +661,14 @@ fn main() {
                         let right_down = unsafe { (GetAsyncKeyState(VK_RBUTTON as i32) as u16 & 0x8000) != 0 };
 
                         if left_down {
-                            let pos = get_system_cursor_position();
                             if !prev_left {
+                                let pos = get_system_cursor_position();
                                 let _ = app_handle.emit("mouse-click", ClickEvent {
                                     x: pos.x,
                                     y: pos.y,
                                     button: "left".into(),
                                 });
-                                let _ = app_handle.emit("draw-start", pos);
-                            } else {
-                                let _ = app_handle.emit("draw-point", pos);
                             }
-                        } else if prev_left {
-                            let _ = app_handle.emit("draw-end", ());
                         }
 
                         if right_down && !prev_right {
