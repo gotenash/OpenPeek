@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { saveRecording, type SavedVideo } from '../utils/db';
 import { resolveAccurateBlobDuration } from '../utils/subtitlesEngine';
-import { webcamSegmenter, type WebcamBackgroundEffect } from '../utils/webcamSegmenter';
+import { webcamSegmenter, type WebcamBackgroundEffect, type WebcamVirtualBg } from '../utils/webcamSegmenter';
 
 export interface RecorderOptions {
   resolution: '1080p' | '720p' | '4k';
@@ -18,6 +18,8 @@ export interface RecorderOptions {
   webcamMirrorMode?: boolean;
   webcamGlow?: boolean;
   webcamBackgroundEffect?: WebcamBackgroundEffect;
+  webcamVirtualBg?: WebcamVirtualBg;
+  webcamCustomBgImage?: string;
   showMouseClicks: boolean;
   enableAutoZoom?: boolean;
   autoZoomFactor?: number;
@@ -591,7 +593,12 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           // Determine if background segmentation/blur effect is active
           let sourceDrawable: CanvasImageSource = webcamVideoRef.current;
           if (opts.webcamBackgroundEffect && opts.webcamBackgroundEffect !== 'none') {
-            const processed = webcamSegmenter.processFrame(webcamVideoRef.current, opts.webcamBackgroundEffect);
+            const processed = webcamSegmenter.processFrame(
+              webcamVideoRef.current, 
+              opts.webcamBackgroundEffect,
+              opts.webcamVirtualBg,
+              opts.webcamCustomBgImage
+            );
             if (processed) {
               sourceDrawable = processed;
             }

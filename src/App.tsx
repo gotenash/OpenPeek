@@ -39,6 +39,8 @@ function MainApp() {
     webcamMirrorMode: true,
     webcamGlow: true,
     webcamBackgroundEffect: 'none',
+    webcamVirtualBg: 'transparent',
+    webcamCustomBgImage: '',
     showMouseClicks: true,
     enableAutoZoom: false,
     autoZoomFactor: 1.75,

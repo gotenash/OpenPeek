@@ -5,6 +5,7 @@ import {
   Key, Eye, EyeOff, Check, ExternalLink, ShieldCheck, Trash2, CheckCircle2, AlertCircle, RefreshCw
 } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
+import { webcamSegmenter } from '../utils/webcamSegmenter';
 
 interface SettingsPanelProps {
   options: RecorderOptions;
@@ -237,6 +238,8 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
   }, [options.showWebcam, options.selectedCamId, isRecording, activeTab]);
 
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  const previewCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const customBgFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (videoRef.current) {
@@ -250,6 +253,59 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
       }
     }
   }, [previewStream]);
+
+  // Live segmentation preview render loop
+  useEffect(() => {
+    if (!previewStream || activeTab !== 'webcam' || !options.webcamBackgroundEffect || options.webcamBackgroundEffect === 'none') {
+      return;
+    }
+
+    let animId: number;
+    let isMounted = true;
+
+    const render = () => {
+      if (!isMounted) return;
+
+      const video = videoRef.current;
+      const canvas = previewCanvasRef.current;
+
+      const effect = options.webcamBackgroundEffect;
+      if (!effect || effect === 'none') return;
+
+      if (video && video.readyState >= 2 && canvas) {
+        const processed = webcamSegmenter.processFrame(
+          video, 
+          effect,
+          options.webcamVirtualBg || 'transparent',
+          options.webcamCustomBgImage
+        );
+        const source = processed || video;
+        const sw = (source as any).videoWidth || (source as any).width;
+        const sh = (source as any).videoHeight || (source as any).height;
+
+        if (sw > 0 && sw !== undefined && sh > 0 && sh !== undefined) {
+          if (canvas.width !== sw || canvas.height !== sh) {
+            canvas.width = sw;
+            canvas.height = sh;
+          }
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(source as any, 0, 0);
+          }
+        }
+      }
+
+      animId = requestAnimationFrame(render);
+    };
+
+    animId = requestAnimationFrame(render);
+
+    return () => {
+      isMounted = false;
+      cancelAnimationFrame(animId);
+    };
+  }, [previewStream, activeTab, options.webcamBackgroundEffect, options.webcamVirtualBg, options.webcamCustomBgImage]);
 
   const handleCheckbox = (key: keyof RecorderOptions) => {
     setOptions(prev => ({ ...prev, [key]: !prev[key] } as any));
@@ -967,6 +1023,136 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
                       </button>
                     ))}
                   </div>
+
+                  {/* When "Détourage" is selected: Virtual Background Selection */}
+                  {options.webcamBackgroundEffect === 'remove' && (
+                    <div style={{
+                      marginTop: '8px',
+                      padding: '10px 12px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(139, 92, 246, 0.25)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <label className="form-label" style={{ fontSize: '11px', margin: 0, fontWeight: 600, color: '#c084fc' }}>
+                          🎨 Fond du Détourage
+                        </label>
+                        <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                          {(options.webcamVirtualBg === 'custom' && options.webcamCustomBgImage) ? 'Image active' : ''}
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                        {[
+                          { id: 'transparent', label: '🪟 Transparent', bg: 'repeating-conic-gradient(#334155 0% 25%, #1e293b 0% 50%) 50% / 8px 8px' },
+                          { id: 'greenscreen', label: '🟩 Vert Chroma', bg: '#00ff00' },
+                          { id: 'studio-dark', label: '🌌 Studio Sombre', bg: 'linear-gradient(135deg, #1e1b4b, #0f172a)' },
+                          { id: 'neon-purple', label: '🔮 Cyber Neon', bg: 'linear-gradient(135deg, #3b0764, #18052e)' },
+                          { id: 'slate-clean', label: '🏢 Slate Moderne', bg: 'linear-gradient(135deg, #1e293b, #334155)' },
+                          { id: 'warm-sunset', label: '🌅 Sunset', bg: 'linear-gradient(135deg, #451a03, #1c1917)' },
+                          { id: 'emerald', label: '🌲 Émeraude', bg: 'linear-gradient(135deg, #064e3b, #022c22)' },
+                          { id: 'custom', label: '🖼️ Image Perso', bg: options.webcamCustomBgImage ? `url(${options.webcamCustomBgImage}) center/cover` : 'rgba(255,255,255,0.08)' }
+                        ].map((bgItem) => {
+                          const isSelected = (options.webcamVirtualBg || 'transparent') === bgItem.id;
+                          return (
+                            <button
+                              key={bgItem.id}
+                              type="button"
+                              className="btn-toolbar"
+                              onClick={() => {
+                                handleSelect('webcamVirtualBg', bgItem.id);
+                                if (bgItem.id === 'custom' && !options.webcamCustomBgImage) {
+                                  customBgFileInputRef.current?.click();
+                                }
+                              }}
+                              style={{
+                                fontSize: '10px',
+                                padding: '5px 4px',
+                                justifyContent: 'center',
+                                position: 'relative',
+                                backgroundColor: isSelected ? 'rgba(139, 92, 246, 0.25)' : 'rgba(255,255,255,0.03)',
+                                borderColor: isSelected ? '#8b5cf6' : 'var(--border-color)',
+                                color: isSelected ? '#e9d5ff' : 'var(--text-secondary)',
+                                borderRadius: '6px',
+                                overflow: 'hidden'
+                              }}
+                            >
+                              <span style={{ 
+                                display: 'inline-block', 
+                                width: '10px', 
+                                height: '10px', 
+                                borderRadius: '50%', 
+                                background: bgItem.bg, 
+                                marginRight: '4px',
+                                flexShrink: 0,
+                                border: '1px solid rgba(255,255,255,0.2)'
+                              }} />
+                              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {bgItem.label}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Hidden File Input for Custom Background Image */}
+                      <input 
+                        ref={customBgFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              if (reader.result) {
+                                setOptions(prev => ({
+                                  ...prev,
+                                  webcamVirtualBg: 'custom',
+                                  webcamCustomBgImage: reader.result as string
+                                }));
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+
+                      {options.webcamVirtualBg === 'custom' && (
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '2px' }}>
+                          <button
+                            type="button"
+                            className="btn-toolbar"
+                            onClick={() => customBgFileInputRef.current?.click()}
+                            style={{ flex: 1, fontSize: '10px', padding: '4px 8px', justifyContent: 'center' }}
+                          >
+                            {options.webcamCustomBgImage ? '🔄 Changer d\'image...' : '📁 Choisir une image locale...'}
+                          </button>
+                          {options.webcamCustomBgImage && (
+                            <button
+                              type="button"
+                              className="btn-toolbar"
+                              onClick={() => {
+                                setOptions(prev => ({
+                                  ...prev,
+                                  webcamVirtualBg: 'transparent',
+                                  webcamCustomBgImage: ''
+                                }));
+                              }}
+                              style={{ fontSize: '10px', padding: '4px 8px', color: '#f87171' }}
+                              title="Supprimer l'image"
+                            >
+                              Supprimer
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Toggles: Mirror Mode & Neon Glow */}
@@ -1003,7 +1189,9 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
                 overflow: 'hidden', 
                 position: 'relative',
                 border: (options.webcamHaloColor === 'none') ? 'none' : `3px solid ${options.webcamHaloColor || '#8b5cf6'}`, 
-                backgroundColor: '#0a0a0a',
+                background: (options.webcamBackgroundEffect === 'remove' && (options.webcamVirtualBg === 'transparent' || !options.webcamVirtualBg))
+                  ? 'repeating-conic-gradient(#1e293b 0% 25%, #0f172a 0% 50%) 50% / 16px 16px'
+                  : '#0a0a0a',
                 width: (options.webcamShape === 'rect') ? '200px' : '160px',
                 height: (options.webcamShape === 'rect') ? '112px' : '160px',
                 margin: '0 auto',
@@ -1023,7 +1211,18 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
                         width: '100%', 
                         height: '100%', 
                         objectFit: 'cover', 
-                        transform: (options.webcamMirrorMode !== false) ? 'scaleX(-1)' : 'none' 
+                        transform: (options.webcamMirrorMode !== false) ? 'scaleX(-1)' : 'none',
+                        display: (options.webcamBackgroundEffect && options.webcamBackgroundEffect !== 'none') ? 'none' : 'block'
+                      }}
+                    />
+                    <canvas
+                      ref={previewCanvasRef}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        transform: (options.webcamMirrorMode !== false) ? 'scaleX(-1)' : 'none',
+                        display: (options.webcamBackgroundEffect && options.webcamBackgroundEffect !== 'none') ? 'block' : 'none'
                       }}
                     />
                     {options.webcamBackgroundEffect && options.webcamBackgroundEffect !== 'none' && (
@@ -1044,7 +1243,15 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
                         pointerEvents: 'none',
                         zIndex: 2
                       }}>
-                        {options.webcamBackgroundEffect === 'blur-light' ? '✨ Flou subtil' : options.webcamBackgroundEffect === 'blur-heavy' ? '✨ Flou intense' : '✂️ Détourage'}
+                        {options.webcamBackgroundEffect === 'blur-light' ? '✨ Flou subtil' : 
+                         options.webcamBackgroundEffect === 'blur-heavy' ? '✨ Flou intense' : 
+                         options.webcamVirtualBg === 'greenscreen' ? '🟩 Vert Chroma' :
+                         options.webcamVirtualBg === 'studio-dark' ? '🌌 Studio Sombre' :
+                         options.webcamVirtualBg === 'neon-purple' ? '🔮 Cyber Neon' :
+                         options.webcamVirtualBg === 'slate-clean' ? '🏢 Slate' :
+                         options.webcamVirtualBg === 'warm-sunset' ? '🌅 Sunset' :
+                         options.webcamVirtualBg === 'emerald' ? '🌲 Émeraude' :
+                         options.webcamVirtualBg === 'custom' ? '🖼️ Image Perso' : '✂️ Détourage'}
                       </div>
                     )}
                   </>
