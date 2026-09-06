@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { saveRecording, type SavedVideo } from '../utils/db';
 import { resolveAccurateBlobDuration } from '../utils/subtitlesEngine';
+import { webcamSegmenter, type WebcamBackgroundEffect } from '../utils/webcamSegmenter';
 
 export interface RecorderOptions {
   resolution: '1080p' | '720p' | '4k';
@@ -16,6 +17,7 @@ export interface RecorderOptions {
   webcamHaloColor?: string;
   webcamMirrorMode?: boolean;
   webcamGlow?: boolean;
+  webcamBackgroundEffect?: WebcamBackgroundEffect;
   showMouseClicks: boolean;
   enableAutoZoom?: boolean;
   autoZoomFactor?: number;
@@ -586,6 +588,15 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
             ctx.translate(-x, -y);
           }
 
+          // Determine if background segmentation/blur effect is active
+          let sourceDrawable: CanvasImageSource = webcamVideoRef.current;
+          if (opts.webcamBackgroundEffect && opts.webcamBackgroundEffect !== 'none') {
+            const processed = webcamSegmenter.processFrame(webcamVideoRef.current, opts.webcamBackgroundEffect);
+            if (processed) {
+              sourceDrawable = processed;
+            }
+          }
+
           if (shape === 'rect') {
             const targetAspect = boxW / boxH;
             const srcAspect = wVideo / hVideo;
@@ -597,12 +608,12 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
               sHeight = wVideo / targetAspect;
               sy = (hVideo - sHeight) / 2;
             }
-            ctx.drawImage(webcamVideoRef.current, sx, sy, sWidth, sHeight, x - boxW / 2, y - boxH / 2, boxW, boxH);
+            ctx.drawImage(sourceDrawable, sx, sy, sWidth, sHeight, x - boxW / 2, y - boxH / 2, boxW, boxH);
           } else {
             const minDim = Math.min(wVideo, hVideo);
             const sx = (wVideo - minDim) / 2;
             const sy = (hVideo - minDim) / 2;
-            ctx.drawImage(webcamVideoRef.current, sx, sy, minDim, minDim, x - r, y - r, boxW, boxH);
+            ctx.drawImage(sourceDrawable, sx, sy, minDim, minDim, x - r, y - r, boxW, boxH);
           }
           ctx.restore();
           ctx.restore();

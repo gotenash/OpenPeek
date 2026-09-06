@@ -332,7 +332,26 @@ fn toggle_overlay(app: tauri::AppHandle) {
 }
 
 fn find_ffmpeg_executable() -> Option<std::path::PathBuf> {
-    // 1. Check if ffmpeg is in PATH
+    // 1. Check next to running executable (bundled with setup or in resources)
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(parent) = current_exe.parent() {
+            let candidates = [
+                parent.join("ffmpeg.exe"),
+                parent.join("binaries").join("ffmpeg.exe"),
+                parent.join("resources").join("binaries").join("ffmpeg.exe"),
+                parent.join("resources").join("ffmpeg.exe"),
+                parent.join("..").join("src-tauri").join("binaries").join("ffmpeg.exe"),
+                parent.join("..").join("..").join("src-tauri").join("binaries").join("ffmpeg.exe"),
+            ];
+            for c in &candidates {
+                if c.exists() {
+                    return Some(c.clone());
+                }
+            }
+        }
+    }
+
+    // 2. Check if ffmpeg is in PATH
     let mut check_cmd = std::process::Command::new("ffmpeg");
     #[cfg(windows)]
     {
@@ -414,6 +433,10 @@ async fn convert_webm_to_mp4(webm_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
         "-y",
         "-i",
         input_path.to_str().unwrap(),
+        "-map",
+        "0:v",
+        "-map",
+        "0:a?",
         "-c:v",
         "libx264",
         "-preset",

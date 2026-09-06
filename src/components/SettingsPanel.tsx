@@ -933,6 +933,42 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
                   </div>
                 </div>
 
+                {/* Webcam Studio: Background Blur & AI Segmentation */}
+                <div>
+                  <label className="form-label" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>Arrière-plan de la Facecam</span>
+                    <span style={{ fontSize: '9px', padding: '1px 6px', borderRadius: '4px', backgroundColor: 'rgba(139, 92, 246, 0.25)', color: '#c084fc', fontWeight: 600 }}>
+                      IA Locale (MediaPipe)
+                    </span>
+                  </label>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {[
+                      { id: 'none', label: 'Normal' },
+                      { id: 'blur-light', label: 'Flou subtil' },
+                      { id: 'blur-heavy', label: 'Flou intense' },
+                      { id: 'remove', label: 'Détourage' }
+                    ].map((eff) => (
+                      <button
+                        key={eff.id}
+                        type="button"
+                        className="btn-toolbar"
+                        onClick={() => handleSelect('webcamBackgroundEffect', eff.id)}
+                        style={{
+                          flex: 1,
+                          fontSize: '11px',
+                          padding: '6px 4px',
+                          justifyContent: 'center',
+                          backgroundColor: (options.webcamBackgroundEffect || 'none') === eff.id ? 'rgba(139, 92, 246, 0.25)' : 'rgba(255,255,255,0.04)',
+                          borderColor: (options.webcamBackgroundEffect || 'none') === eff.id ? '#8b5cf6' : 'var(--border-color)',
+                          color: (options.webcamBackgroundEffect || 'none') === eff.id ? '#c084fc' : 'var(--text-secondary)'
+                        }}
+                      >
+                        {eff.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Toggles: Mirror Mode & Neon Glow */}
                 <div style={{ display: 'flex', gap: '14px', paddingTop: '4px' }}>
                   <label className="form-checkbox-row" style={{ cursor: 'pointer' }}>
@@ -965,6 +1001,7 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
               <div style={{ 
                 borderRadius: (options.webcamShape === 'squircle') ? '24px' : (options.webcamShape === 'rect') ? '12px' : '50%', 
                 overflow: 'hidden', 
+                position: 'relative',
                 border: (options.webcamHaloColor === 'none') ? 'none' : `3px solid ${options.webcamHaloColor || '#8b5cf6'}`, 
                 backgroundColor: '#0a0a0a',
                 width: (options.webcamShape === 'rect') ? '200px' : '160px',
@@ -977,17 +1014,40 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
                 transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
               }}>
                 {previewStream ? (
-                  <video
-                    ref={videoRef}
-                    muted
-                    playsInline
-                    style={{ 
-                      width: '100%', 
-                      height: '100%', 
-                      objectFit: 'cover', 
-                      transform: (options.webcamMirrorMode !== false) ? 'scaleX(-1)' : 'none' 
-                    }}
-                  />
+                  <>
+                    <video
+                      ref={videoRef}
+                      muted
+                      playsInline
+                      style={{ 
+                        width: '100%', 
+                        height: '100%', 
+                        objectFit: 'cover', 
+                        transform: (options.webcamMirrorMode !== false) ? 'scaleX(-1)' : 'none' 
+                      }}
+                    />
+                    {options.webcamBackgroundEffect && options.webcamBackgroundEffect !== 'none' && (
+                      <div style={{
+                        position: 'absolute',
+                        bottom: '6px',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        backgroundColor: 'rgba(15, 23, 42, 0.85)',
+                        backdropFilter: 'blur(4px)',
+                        border: '1px solid rgba(139, 92, 246, 0.4)',
+                        borderRadius: '4px',
+                        padding: '1px 6px',
+                        fontSize: '9px',
+                        color: '#c084fc',
+                        fontWeight: 600,
+                        whiteSpace: 'nowrap',
+                        pointerEvents: 'none',
+                        zIndex: 2
+                      }}>
+                        {options.webcamBackgroundEffect === 'blur-light' ? '✨ Flou subtil' : options.webcamBackgroundEffect === 'blur-heavy' ? '✨ Flou intense' : '✂️ Détourage'}
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <span style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', padding: '10px' }}>
                     Aperçu caméra

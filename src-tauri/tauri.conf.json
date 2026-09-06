@@ -13,6 +13,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": [
+      "binaries/ffmpeg.exe"
+    ],
     "windows": {
       "nsis": {
         "languages": ["French", "English"],

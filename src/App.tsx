@@ -38,6 +38,7 @@ function MainApp() {
     webcamHaloColor: '#8b5cf6',
     webcamMirrorMode: true,
     webcamGlow: true,
+    webcamBackgroundEffect: 'none',
     showMouseClicks: true,
     enableAutoZoom: false,
     autoZoomFactor: 1.75,

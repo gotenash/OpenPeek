@@ -70,8 +70,10 @@ export function VideoEditorStudio() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  const [exportCurrentSec, setExportCurrentSec] = useState(0);
   const [exportStatus, setExportStatus] = useState<string>('');
   const [exportedBlob, setExportedBlob] = useState<Blob | null>(null);
+  const abortExportRef = useRef<boolean>(false);
 
   // Title modal state
   const [isTitleModalOpen, setIsTitleModalOpen] = useState(false);
@@ -106,6 +108,7 @@ export function VideoEditorStudio() {
   const audioFileInputRef = useRef<HTMLInputElement>(null);
   const audioPreviewElRef = useRef<HTMLAudioElement | null>(null);
   const bgMusicAudioRef = useRef<HTMLAudioElement | null>(null);
+  const exportContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Load recordings & saved projects from IndexedDB
   const loadLibraryAndProjects = async () => {
@@ -931,89 +934,153 @@ export function VideoEditorStudio() {
 
   // --- Project Video Export ---
 
+  const handleCancelExport = () => {
+    abortExportRef.current = true;
+    setIsExporting(false);
+    setExportStatus('');
+    setExportProgress(0);
+    setExportCurrentSec(0);
+  };
+
   const handleExportProject = async () => {
     if (project.clips.length === 0 || totalDuration <= 0) {
       alert("Ajoutez au moins un clip à la timeline avant d'exporter.");
       return;
     }
 
+    abortExportRef.current = false;
+    setExportCurrentSec(0);
     videoElementsRef.current.forEach(v => v.pause());
     if (bgMusicAudioRef.current) bgMusicAudioRef.current.pause();
     setIsPlaying(false);
     setIsExporting(true);
     setExportProgress(0);
+    setExportStatus('Préparation du montage...');
 
     const exportCanvas = document.createElement('canvas');
     exportCanvas.width = 1920;
     exportCanvas.height = 1080;
     const exportCtx = exportCanvas.getContext('2d');
+    if (!exportCtx) {
+      setIsExporting(false);
+      alert("Erreur: Contexte Canvas indisponible.");
+      return;
+    }
 
-    // Build mixed Audio + Video stream for MediaRecorder
-    let combinedStream: MediaStream = exportCanvas.captureStream(30);
+    // Build clean AudioContext + Destination
     let exportAudioCtx: AudioContext | null = null;
-    let bgExportAudioEl: HTMLAudioElement | null = null;
-    let bgGain: GainNode | null = null;
+    let dest: MediaStreamAudioDestinationNode | null = null;
     let voiceAnalyser: AnalyserNode | null = null;
     let voiceDataArray: Uint8Array | null = null;
+    const exportVideos = new Map<string, HTMLVideoElement>();
+    let bgExportAudioEl: HTMLAudioElement | null = null;
+    let bgGain: GainNode | null = null;
+    const container = exportContainerRef.current || document.body;
 
     try {
       exportAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
       if (exportAudioCtx.state === 'suspended') {
         await exportAudioCtx.resume();
       }
-      const dest = exportAudioCtx.createMediaStreamDestination();
+      dest = exportAudioCtx.createMediaStreamDestination();
 
       voiceAnalyser = exportAudioCtx.createAnalyser();
       voiceAnalyser.fftSize = 256;
       voiceDataArray = new Uint8Array(voiceAnalyser.frequencyBinCount);
 
-      // 1. Connect video clips audio to destination and speech analyser
+      // Create fresh dedicated video elements for this export session in the DOM
+      // This prevents cross-context DOMExceptions and guarantees unmuted audio
       for (const clip of project.clips) {
-        const videoEl = videoElementsRef.current.get(clip.id);
-        if (videoEl) {
-          try {
-            let source = (videoEl as any)._audioSourceNode as MediaElementAudioSourceNode;
-            if (!source) {
-              source = exportAudioCtx.createMediaElementSource(videoEl);
-              (videoEl as any)._audioSourceNode = source;
-            }
-            source.connect(dest);
-            source.connect(voiceAnalyser);
-          } catch (audioErr) {
-            console.warn("Audio node connection:", audioErr);
-          }
+        const v = document.createElement('video');
+        v.src = URL.createObjectURL(clip.video.blob);
+        v.preload = 'auto';
+        v.playsInline = true;
+        v.muted = false;
+        v.volume = 1.0;
+        container.appendChild(v);
+        exportVideos.set(clip.id, v);
+
+        try {
+          const source = exportAudioCtx.createMediaElementSource(v);
+          source.connect(dest);
+          source.connect(voiceAnalyser);
+        } catch (audioErr) {
+          console.warn("Audio node connection error for clip:", clip.id, audioErr);
         }
       }
 
-      // 2. Connect Background Music with dedicated GainNode for intelligent ducking
+      // Connect Background Music if present
       if (project.backgroundMusic && project.backgroundMusic.blob) {
         bgExportAudioEl = document.createElement('audio');
         bgExportAudioEl.src = URL.createObjectURL(project.backgroundMusic.blob);
         bgExportAudioEl.loop = project.backgroundMusic.loop !== false;
-        
+        container.appendChild(bgExportAudioEl);
         try {
           const bgSource = exportAudioCtx.createMediaElementSource(bgExportAudioEl);
           bgGain = exportAudioCtx.createGain();
           bgGain.gain.value = project.backgroundMusic.volume ?? 0.15;
           bgSource.connect(bgGain);
           bgGain.connect(dest);
-          bgExportAudioEl.play().catch(() => {});
         } catch (e) {
           console.warn("Bg music audio route error:", e);
         }
       }
-
-      if (dest.stream.getAudioTracks().length > 0) {
-        combinedStream = new MediaStream([
-          ...exportCanvas.captureStream(30).getVideoTracks(),
-          ...dest.stream.getAudioTracks()
-        ]);
-      }
     } catch (e) {
-      console.warn("AudioContext initialization warning:", e);
+      console.warn("AudioContext setup warning:", e);
     }
 
-    // Always record via WebM for 100% stability with Web Audio (prevents Chromium MP4 audio encoding crash)
+    // Wait for all clips to load enough data (readyState >= 2)
+    setExportStatus('Préparation et décodage des vidéos...');
+    await Promise.all(project.clips.map((clip) => {
+      const v = exportVideos.get(clip.id);
+      if (!v || v.readyState >= 2) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        let isDone = false;
+        const done = () => {
+          if (!isDone) {
+            isDone = true;
+            v.removeEventListener('loadeddata', done);
+            v.removeEventListener('canplay', done);
+            resolve();
+          }
+        };
+        v.addEventListener('loadeddata', done);
+        v.addEventListener('canplay', done);
+        setTimeout(done, 2500);
+      });
+    }));
+
+    // Pre-seek first clip if applicable
+    if (project.clips.length > 0) {
+      const firstClip = project.clips[0];
+      const firstVideo = exportVideos.get(firstClip.id);
+      if (firstVideo && firstClip.startTrim > 0) {
+        firstVideo.currentTime = firstClip.startTrim;
+        await new Promise<void>((resolve) => {
+          if (Math.abs(firstVideo.currentTime - firstClip.startTrim) < 0.1) {
+            resolve();
+            return;
+          }
+          const onSeek = () => {
+            firstVideo.removeEventListener('seeked', onSeek);
+            resolve();
+          };
+          firstVideo.addEventListener('seeked', onSeek);
+          setTimeout(resolve, 1000);
+        });
+      }
+    }
+
+    // Capture canvas video stream (called ONCE)
+    const canvasStream = exportCanvas.captureStream(30);
+    const audioTracks = dest ? dest.stream.getAudioTracks() : [];
+    const combinedTracks: MediaStreamTrack[] = [...canvasStream.getVideoTracks()];
+    if (audioTracks.length > 0) {
+      combinedTracks.push(audioTracks[0]);
+    }
+    const combinedStream = new MediaStream(combinedTracks);
+
+    // Record via WebM for 100% stability with Web Audio (prevents Chromium MP4 audio encoding crash)
     const chosenMime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
       ? 'video/webm;codecs=vp9,opus'
       : (MediaRecorder.isTypeSupported('video/webm;codecs=h264,opus')
@@ -1030,61 +1097,65 @@ export function VideoEditorStudio() {
     };
 
     let isFinished = false;
-    let exportTimerId: number | null = null;
-    let exportAnimId: number | null = null;
+    let animId: number | null = null;
+    let watchdogTimer: any = null;
+
+    const cleanupExportSession = () => {
+      isFinished = true;
+      if (animId) cancelAnimationFrame(animId);
+      if (watchdogTimer) clearInterval(watchdogTimer);
+      exportVideos.forEach((v) => {
+        v.pause();
+        URL.revokeObjectURL(v.src);
+        v.remove();
+      });
+      exportVideos.clear();
+      if (bgExportAudioEl) {
+        bgExportAudioEl.pause();
+        URL.revokeObjectURL(bgExportAudioEl.src);
+        bgExportAudioEl.remove();
+      }
+      if (exportAudioCtx) {
+        exportAudioCtx.close().catch(() => {});
+      }
+    };
 
     mediaRecorder.onerror = (event: any) => {
       console.error("MediaRecorder export error:", event);
-      isFinished = true;
-      if (exportTimerId) clearTimeout(exportTimerId);
-      if (exportAnimId) cancelAnimationFrame(exportAnimId);
+      cleanupExportSession();
       setIsExporting(false);
       setExportStatus('');
       alert("Une erreur est survenue lors de l'enregistrement du flux vidéo.");
     };
 
+    setExportStatus('Enregistrement du montage en cours...');
     mediaRecorder.start(100);
+    if (bgExportAudioEl) {
+      bgExportAudioEl.play().catch(() => {});
+    }
 
-    let exportTime = 0;
-    let lastExportTime = performance.now();
-
-    const scheduleNextFrame = () => {
-      if (isFinished) return;
-      exportAnimId = requestAnimationFrame(exportLoop);
-      // Fallback timer so that if window is minimized / backgrounded, export continues smoothly and does not jump
-      exportTimerId = window.setTimeout(exportLoop, 35);
-    };
+    const startTime = performance.now();
+    let lastTickTime = performance.now();
 
     const exportLoop = () => {
-      if (isFinished) return;
-      if (exportTimerId) {
-        clearTimeout(exportTimerId);
-        exportTimerId = null;
-      }
-      if (exportAnimId) {
-        cancelAnimationFrame(exportAnimId);
-        exportAnimId = null;
-      }
-
+      if (isFinished || abortExportRef.current) return;
+      lastTickTime = performance.now();
       const now = performance.now();
-      // Cap dt to avoid skipping entire video when app is backgrounded or tabbed away
-      const rawDt = (now - lastExportTime) / 1000;
-      const dt = Math.min(0.04, Math.max(0.005, rawDt));
-      lastExportTime = now;
+      const elapsedSec = (now - startTime) / 1000;
 
-      exportTime += dt;
-      setExportProgress(Math.min(94, Math.round((exportTime / totalDuration) * 94)));
-
-      if (exportTime >= totalDuration) {
+      if (elapsedSec >= totalDuration) {
         isFinished = true;
-        mediaRecorder.stop();
-        videoElementsRef.current.forEach(v => v.pause());
-        if (bgExportAudioEl) {
-          bgExportAudioEl.pause();
-          URL.revokeObjectURL(bgExportAudioEl.src);
+        if (mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
         }
         return;
       }
+
+      const currentExportTime = Math.min(totalDuration, elapsedSec);
+      setExportCurrentSec(currentExportTime);
+      const pct = Math.min(94, Math.round((currentExportTime / totalDuration) * 94));
+      setExportProgress(pct);
+      setExportStatus(`Enregistrement du flux (${formatTime(currentExportTime)} / ${formatTime(totalDuration)})`);
 
       // Auto-ducking: dynamically lower background music volume during speech
       if (bgGain && exportAudioCtx && project.backgroundMusic && project.backgroundMusic.autoDucking !== false && voiceAnalyser && voiceDataArray) {
@@ -1101,108 +1172,134 @@ export function VideoEditorStudio() {
         bgGain.gain.setTargetAtTime(targetVol, exportAudioCtx.currentTime, 0.12);
       }
 
-      if (exportCtx) {
-        exportCtx.fillStyle = '#0a0a0a';
-        exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+      exportCtx.fillStyle = '#0a0a0a';
+      exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
 
-        // Apply Timeline Zoom Transform in final render
-        const activeZoom = getActiveTimelineZoom(project.zooms, exportTime);
-        const isZoomed = applyTimelineZoomTransform(exportCtx, activeZoom, exportTime, exportCanvas.width, exportCanvas.height);
+      // Apply Timeline Zoom Transform in final render
+      const activeZoom = getActiveTimelineZoom(project.zooms, currentExportTime);
+      const isZoomed = applyTimelineZoomTransform(exportCtx, activeZoom, currentExportTime, exportCanvas.width, exportCanvas.height);
 
-        let cumulative = 0;
-        for (let i = 0; i < project.clips.length; i++) {
-          const clip = project.clips[i];
-          const speed = clip.playbackSpeed && clip.playbackSpeed > 0 ? clip.playbackSpeed : 1.0;
-          const clipDuration = Math.max(0.1, (clip.endTrim - clip.startTrim) / speed);
-          const isLast = i === project.clips.length - 1;
-          const transDur = (!isLast && clip.transitionToNext !== 'none')
-            ? Math.min(clip.transitionDuration, clipDuration / 2)
-            : 0;
+      let cumulative = 0;
+      for (let i = 0; i < project.clips.length; i++) {
+        const clip = project.clips[i];
+        const speed = clip.playbackSpeed && clip.playbackSpeed > 0 ? clip.playbackSpeed : 1.0;
+        const clipDuration = Math.max(0.1, (clip.endTrim - clip.startTrim) / speed);
+        const isLast = i === project.clips.length - 1;
+        const transDur = (!isLast && clip.transitionToNext !== 'none')
+          ? Math.min(clip.transitionDuration, clipDuration / 2)
+          : 0;
 
-          const clipStart = cumulative;
-          const clipEnd = cumulative + clipDuration;
-          const videoEl = videoElementsRef.current.get(clip.id);
+        const clipStart = cumulative;
+        const clipEnd = cumulative + clipDuration;
+        const videoEl = exportVideos.get(clip.id);
 
-          if (exportTime >= clipStart && exportTime <= clipEnd) {
-            if (videoEl) {
-              videoEl.playbackRate = speed;
-              if (videoEl.paused) {
-                videoEl.currentTime = ((exportTime - clipStart) * speed) + clip.startTrim;
-                videoEl.play().catch(() => {});
-              }
-              if (videoEl.readyState >= 2) {
-                exportCtx.drawImage(videoEl, 0, 0, exportCanvas.width, exportCanvas.height);
-                if (speed > 1.0) {
-                  drawFastForwardBadge(exportCtx, speed, exportCanvas.width, exportCanvas.height);
-                }
-              }
+        if (currentExportTime >= clipStart && currentExportTime <= clipEnd) {
+          if (videoEl) {
+            videoEl.playbackRate = speed;
+            if (videoEl.paused) {
+              const expectedVideoTime = clip.startTrim + ((currentExportTime - clipStart) * speed);
+              videoEl.currentTime = expectedVideoTime;
+              videoEl.play().catch(() => {});
             }
 
-            if (!isLast && clip.transitionToNext !== 'none' && exportTime > clipEnd - transDur) {
-              const transProgress = (exportTime - (clipEnd - transDur)) / transDur;
-              const nextClip = project.clips[i + 1];
-              const nextVideoEl = videoElementsRef.current.get(nextClip.id);
-
-              if (nextVideoEl) {
-                if (nextVideoEl.paused) {
-                  nextVideoEl.currentTime = nextClip.startTrim + (transProgress * transDur);
-                  nextVideoEl.play().catch(() => {});
-                }
-
-                if (nextVideoEl.readyState >= 2) {
-                  exportCtx.save();
-                  if (clip.transitionToNext === 'crossfade') {
-                    exportCtx.globalAlpha = transProgress;
-                    exportCtx.drawImage(nextVideoEl, 0, 0, exportCanvas.width, exportCanvas.height);
-                  } else if (clip.transitionToNext === 'fade-black') {
-                    exportCtx.fillStyle = '#000000';
-                    exportCtx.globalAlpha = Math.sin(transProgress * Math.PI);
-                    exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
-                  } else if (clip.transitionToNext === 'slide') {
-                    const offsetX = (1.0 - transProgress) * exportCanvas.width;
-                    exportCtx.drawImage(nextVideoEl, offsetX, 0, exportCanvas.width, exportCanvas.height);
-                  }
-                  exportCtx.restore();
-                }
+            if (videoEl.readyState >= 1) {
+              exportCtx.drawImage(videoEl, 0, 0, exportCanvas.width, exportCanvas.height);
+              if (speed > 1.0) {
+                drawFastForwardBadge(exportCtx, speed, exportCanvas.width, exportCanvas.height);
               }
-            }
-          } else {
-            if (videoEl && !videoEl.paused && (exportTime < clipStart - 1 || exportTime > clipEnd + 1)) {
-              videoEl.pause();
             }
           }
 
-          cumulative += clipDuration - transDur;
-        }
+          if (!isLast && clip.transitionToNext !== 'none' && currentExportTime > clipEnd - transDur) {
+            const transProgress = (currentExportTime - (clipEnd - transDur)) / transDur;
+            const nextClip = project.clips[i + 1];
+            const nextVideoEl = exportVideos.get(nextClip.id);
 
-        // Restore zoom transform before drawing text titles on top
-        if (isZoomed) {
-          exportCtx.restore();
-        }
+            if (nextVideoEl) {
+              if (nextVideoEl.paused) {
+                const nextExpectedTime = nextClip.startTrim + (transProgress * transDur);
+                nextVideoEl.currentTime = nextExpectedTime;
+                nextVideoEl.play().catch(() => {});
+              }
 
-        // Overlay titles
-        for (const title of project.titles) {
-          if (exportTime >= title.startTime && exportTime <= title.startTime + title.duration) {
-            drawTitleOverlay(exportCtx, title, exportCanvas.width, exportCanvas.height, exportTime - title.startTime);
+              if (nextVideoEl.readyState >= 1) {
+                exportCtx.save();
+                if (clip.transitionToNext === 'crossfade') {
+                  exportCtx.globalAlpha = transProgress;
+                  exportCtx.drawImage(nextVideoEl, 0, 0, exportCanvas.width, exportCanvas.height);
+                } else if (clip.transitionToNext === 'fade-black') {
+                  exportCtx.fillStyle = '#000000';
+                  exportCtx.globalAlpha = Math.sin(transProgress * Math.PI);
+                  exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+                } else if (clip.transitionToNext === 'slide') {
+                  const offsetX = (1.0 - transProgress) * exportCanvas.width;
+                  exportCtx.drawImage(nextVideoEl, offsetX, 0, exportCanvas.width, exportCanvas.height);
+                }
+                exportCtx.restore();
+              }
+            }
           }
+        } else {
+          if (videoEl && !videoEl.paused && (currentExportTime < clipStart - 0.5 || currentExportTime > clipEnd + 0.5)) {
+            videoEl.pause();
+          }
+        }
+
+        cumulative += clipDuration - transDur;
+      }
+
+
+      // Restore zoom transform before drawing text titles on top
+      if (isZoomed) {
+        exportCtx.restore();
+      }
+
+      // Overlay titles
+      for (const title of project.titles) {
+        if (currentExportTime >= title.startTime && currentExportTime <= title.startTime + title.duration) {
+          drawTitleOverlay(exportCtx, title, exportCanvas.width, exportCanvas.height, currentExportTime - title.startTime);
         }
       }
 
-      scheduleNextFrame();
+      // Mirror rendered frame to master monitor canvas for live visual feedback
+      if (previewCanvasRef.current) {
+        const pCtx = previewCanvasRef.current.getContext('2d');
+        if (pCtx) {
+          pCtx.drawImage(exportCanvas, 0, 0, previewCanvasRef.current.width, previewCanvasRef.current.height);
+        }
+      }
+
+      animId = requestAnimationFrame(exportLoop);
     };
 
+    // Watchdog timer to ensure export continues even when window is minimized / backgrounded
+    watchdogTimer = setInterval(() => {
+      if (isFinished || abortExportRef.current) {
+        clearInterval(watchdogTimer);
+        return;
+      }
+      if (performance.now() - lastTickTime > 80) {
+        exportLoop();
+      }
+    }, 40);
+
+    animId = requestAnimationFrame(exportLoop);
+
     mediaRecorder.onstop = async () => {
+      cleanupExportSession();
+      if (abortExportRef.current) return;
+
       let finalBlob = new Blob(chunks, { type: 'video/webm' });
       let outputExt: 'mp4' | 'webm' = 'webm';
 
       if (exportFormat === 'mp4') {
         try {
-          setExportStatus('Finalisation MP4...');
+          setExportStatus('Finalisation MP4 (H.264 / AAC)...');
           setExportProgress(96);
           const { invoke } = await import('@tauri-apps/api/core');
           const isFfmpeg = await invoke<boolean>('is_ffmpeg_available').catch(() => false);
           if (isFfmpeg) {
-            setExportStatus('Conversion H.264 / AAC...');
+            setExportStatus('Encodage haute qualité FFmpeg...');
             setExportProgress(98);
             const arrayBuf = await finalBlob.arrayBuffer();
             const mp4Bytes = await invoke<number[]>('convert_webm_to_mp4', {
@@ -1211,7 +1308,7 @@ export function VideoEditorStudio() {
             finalBlob = new Blob([new Uint8Array(mp4Bytes)], { type: 'video/mp4' });
             outputExt = 'mp4';
           } else {
-            console.warn("FFmpeg non détecté, exportation WebM par défaut.");
+            console.warn("FFmpeg non détecté, exportation WebM.");
             outputExt = 'webm';
           }
         } catch (convErr) {
@@ -1224,6 +1321,8 @@ export function VideoEditorStudio() {
       setIsExporting(false);
       setExportStatus('');
       setExportProgress(100);
+      setSaveSuccessMsg(`Montage exporté en ${outputExt.toUpperCase()} avec succès !`);
+      setTimeout(() => setSaveSuccessMsg(null), 5000);
 
       // Save to IndexedDB
       await saveRecording({
@@ -1237,8 +1336,6 @@ export function VideoEditorStudio() {
       });
       loadLibraryAndProjects();
     };
-
-    scheduleNextFrame();
   };
 
   const handleDownloadExported = () => {
@@ -1263,6 +1360,12 @@ export function VideoEditorStudio() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%' }}>
+      {/* Hidden container for rendering & export media elements */}
+      <div 
+        ref={exportContainerRef}
+        style={{ position: 'fixed', left: -9999, top: -9999, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} 
+        aria-hidden="true"
+      />
       {/* Hidden file inputs */}
       <input
         type="file"
@@ -1613,6 +1716,100 @@ export function VideoEditorStudio() {
               height={720} 
               style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }}
             />
+
+            {/* Live Export Progress HUD Overlay */}
+            {isExporting && (
+              <div style={{
+                position: 'absolute',
+                inset: 0,
+                backgroundColor: 'rgba(10, 15, 30, 0.75)',
+                backdropFilter: 'blur(5px)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '16px',
+                zIndex: 25
+              }}>
+                <div style={{
+                  backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                  border: '1px solid rgba(139, 92, 246, 0.45)',
+                  borderRadius: '10px',
+                  padding: '12px 18px',
+                  width: '100%',
+                  maxWidth: '420px',
+                  boxShadow: '0 12px 32px rgba(0, 0, 0, 0.7)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Sparkles size={15} className="spinning" color="#a855f7" />
+                      <div>
+                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>Exportation en cours</span>
+                          <span style={{ fontSize: '9px', color: '#a855f7', backgroundColor: 'rgba(168, 85, 247, 0.2)', padding: '1px 5px', borderRadius: '4px' }}>
+                            {exportFormat.toUpperCase()} {exportFormat === 'mp4' ? '(H.264/AAC)' : ''}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                          {exportStatus || "Génération du métrage..."}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '15px', fontWeight: 800, color: '#c084fc', fontFamily: 'var(--font-display)' }}>
+                        {exportProgress}%
+                      </div>
+                      <div style={{ fontSize: '9px', color: '#94a3b8' }}>
+                        {formatTime(exportCurrentSec)} / {formatTime(totalDuration)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* High-Tech Glowing Progress Bar */}
+                  <div style={{
+                    height: '7px',
+                    width: '100%',
+                    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                    borderRadius: '4px',
+                    overflow: 'hidden',
+                    position: 'relative'
+                  }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${exportProgress}%`,
+                      background: 'linear-gradient(90deg, #06b6d4, #8b5cf6, #ec4899)',
+                      borderRadius: '4px',
+                      transition: 'width 0.15s ease-out',
+                      boxShadow: '0 0 10px rgba(139, 92, 246, 0.8)'
+                    }} />
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '9px', color: '#64748b' }}>
+                      Rendu direct image par image
+                    </span>
+                    <button
+                      onClick={handleCancelExport}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid rgba(239, 68, 68, 0.4)',
+                        color: '#f87171',
+                        borderRadius: '4px',
+                        padding: '2px 8px',
+                        fontSize: '10px',
+                        cursor: 'pointer'
+                      }}
+                      title="Interrompre l'exportation"
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Master Transport Controls */}
@@ -1697,10 +1894,10 @@ export function VideoEditorStudio() {
                 className="btn-primary"
                 onClick={handleExportProject}
                 disabled={isExporting || project.clips.length === 0}
-                style={{ fontSize: '11px', padding: '3px 10px' }}
+                style={{ fontSize: '11px', padding: '3px 10px', display: 'flex', alignItems: 'center', gap: '5px' }}
               >
                 {isExporting ? <Sparkles size={12} className="spinning" /> : <Check size={12} />}
-                <span>{isExporting ? (exportStatus || `Export (${exportProgress}%)`) : `Exporter (${exportFormat.toUpperCase()})`}</span>
+                <span>{isExporting ? `Exportation (${exportProgress}%)` : `Exporter (${exportFormat.toUpperCase()})`}</span>
               </button>
 
               {exportedBlob && (
@@ -1765,7 +1962,20 @@ export function VideoEditorStudio() {
                     <span>Créer un GIF</span>
                   </button>
 
-                  <button className="btn-secondary" onClick={handleDownloadExported} style={{ fontSize: '11px', padding: '3px 8px' }}>
+                  <button 
+                    className="btn-primary" 
+                    onClick={handleDownloadExported} 
+                    style={{ 
+                      fontSize: '11px', 
+                      padding: '3px 10px', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '5px',
+                      backgroundColor: '#10b981',
+                      borderColor: '#10b981',
+                      boxShadow: '0 0 10px rgba(16, 185, 129, 0.35)'
+                    }}
+                  >
                     <Download size={12} />
                     <span>Télécharger ({exportedBlob.type.includes('mp4') ? 'MP4' : 'WebM'})</span>
                   </button>

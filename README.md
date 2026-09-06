@@ -22,7 +22,7 @@
 
 ## ✨ Overview
 
-**OpenPeek** is an open-source, ultra-lightweight, GPU-accelerated screen recording suite and video editing studio for Windows. Built on Rust (Tauri v2) and React 19/TypeScript, it features a **Cinematic Studio Cursor**, **Live Keystroke HUD Visualizer**, **Automated Silence Remover**, **Fast-Forward Speed-Up Tool**, **Dynamic AI Subtitles Studio**, **AI Voiceover Generator (TTS)**, **Multi-Track Video Compositor**, **Device Mockup Framing**, **Live Annotation Palette**, and **Privacy Auto-Redaction System** — all running fast, with zero bloatware and 100% local privacy.
+**OpenPeek** is an open-source, ultra-lightweight, GPU-accelerated screen recording suite and video editing studio for Windows. Built on Rust (Tauri v2) and React 19/TypeScript, it features a **Cinematic Studio Cursor**, **Live Keystroke HUD Visualizer**, **Automated Silence Remover**, **Fast-Forward Speed-Up Tool**, **Dynamic AI Subtitles Studio**, **AI Voiceover Generator (TTS)**, **Webcam Background Blur & Segmentation (Bokeh)**, **FFmpeg-Powered MP4 Exporter**, **Multi-Track Video Compositor**, **Device Mockup Framing**, **Live Annotation Palette**, and **Privacy Auto-Redaction System** — all running fast, with zero bloatware and 100% local privacy.
 
 ---
 
@@ -41,19 +41,29 @@
 - **🛡️ Intelligent Recorder Filtering**: Internal OpenPeek shortcuts (`Alt+R`, `F6`, `Alt+P`, `F7`, `Alt+Z`, `F9`, `Alt+D`, `F8`, `Alt+C`, `F10`) are automatically filtered out to avoid polluting your tutorial footage.
 - **Custom Placement**: Position HUD at *Bottom Center*, *Bottom Left*, *Bottom Right*, or *Top Right*.
 
-### ✂️ 3. Automatic Silence Remover
+### 🎭 3. AI Webcam Background Blur & Bokeh (*100% Offline*)
+- **Local Neural Segmentation**: Powered by Google MediaPipe Selfie Segmentation running locally via WebAssembly & WebGL — zero cloud dependency, 100% privacy.
+- **4 Background Modes**:
+  - *Normal*: Raw camera feed with zero overhead.
+  - *Subtle Blur (10px)*: Natural depth of field preserving scene context.
+  - *Intense Blur (25px)*: Heavy portrait bokeh hiding all room background details.
+  - *Cutout (Remove)*: Fully transparent background without any green screen.
+- **Bubble Shapes & Neon Halos**: Works seamlessly with circular, squircle, or rectangular facecam bubbles with glowing neon borders.
+- **Zero-Flicker Warmup**: Instant camera preview with no black-frame glitches.
+
+### ✂️ 4. Automatic Silence Remover
 - **Web Audio API Acoustic Analysis**: Fast client-side PCM energy (RMS/dB) calculation to detect speech pauses and dead air.
 - **Interactive Threshold & Padding Controls**: Fine-tune silence threshold (`-50 dB` to `-20 dB`), minimum silence duration (`0.3s` to `1.5s`), and safety speech padding (`50ms` to `250ms`) so words are never clipped.
 - **Visual Waveform Strip**: Color-coded preview (cyan for speech, red for cut pauses) with duration reduction percentage.
 - **1-Click Splitting**: Instantly converts single recordings into dynamic, punchy multi-clip sequences in the Video Studio and Video Trimmer.
 
-### ⏩ 4. Fast-Forward / Speed-Up on Loading Times
+### ⏩ 5. Fast-Forward / Speed-Up on Loading Times
 - **Per-Clip Speed Multiplier**: Accelerate boring sequences to **`2x`**, **`4x`**, **`8x`**, or **`16x Hyper-Speed`**.
 - **1-Click Loading Slicer (`⏩ 4x`)**: Automatically cuts out the middle loading/build sequence of a clip and applies 4x speed in one click.
 - **Automatic Master Timeline Sync**: Clip duration and project total length automatically adjust according to playback speed.
 - **Neon On-Screen Badge**: Displays an animated **`⏩ Nx FAST-FORWARD`** badge on preview and exported videos for professional tutorial polish.
 
-### 🎙️ 5. Dynamic Subtitles & AI Captions Studio
+### 🎙️ 6. Dynamic Subtitles & AI Captions Studio
 - **Ultra-Fast Whisper STT**: Transcribe entire video audio in ~1 second using Groq Whisper Large v3 or OpenAI Whisper.
 - **Word Animations (Pop / Bounce / Zoom)**: Real-time active word kinetic highlighting (Hormozi / TikTok style elastic pop, dynamic vertical bounce, or focal zoom).
 - **Punchy Short Segmenting**: Automatically chunks sentences into 3–4 word blocks with precise word-level timestamps.
@@ -61,7 +71,7 @@
 - **🌐 1-Click Multilingual Translation**: Translate subtitles into 10+ languages (English, Spanish, German, Italian, French, Japanese, etc.).
 - **SRT & VTT Support**: Import existing subtitle files or export with formatted `.srt` and `.vtt`.
 
-### 🎥 6. Pro Screen Recording, Audio & Global Hotkeys
+### 🎥 7. Pro Screen Recording, Audio & Global Hotkeys
 - **Global Hotkeys (Anywhere on Windows)**:
   - **`F6`** or **`Alt + R`**: Start or Stop recording.
   - **`F7`** or **`Alt + P`**: Pause or Resume recording.
@@ -70,21 +80,21 @@
 - **Multi-Monitor Support**: Automatic monitor detection and multi-display capture via Win32 GDI.
 - **Independent Audio Mixing**: Capture Voice Microphone and System Audio (Desktop sounds) simultaneously.
 - **Smart Audio DSP Filters**: Built-in 85Hz Anti-Rumble High-Pass filter and 3.5kHz vocal clarity presence filter.
-- **Draggable Facecam (Webcam)**: Smooth circular picture-in-picture webcam with live preview, mirror mode, and custom glow halo.
+- **Draggable Facecam (Webcam)**: Smooth circular picture-in-picture webcam with live preview, mirror mode, custom glow halo, and background blur.
 - **Click Ripple Visualizer**: Neon animated rings under mouse clicks with distinct left/right click colors.
 
-### 🔍 7. Dynamic Cursor Zoom
+### 🔍 8. Dynamic Cursor Zoom
 - **`F9` / `Alt + Z`**: Instantly zooms 2.0x centered directly on the mouse cursor with smooth cubic-bezier easing.
 - **Single-Screen Visual & Audio Indicators**: Distinct audio beeps and discreet corner badges keep you informed of zoom state on single-monitor setups.
 
-### ✏️ 8. Freeze & Draw Annotation Engine
+### ✏️ 9. Freeze & Draw Annotation Engine
 - **`F8` / `Alt + D`**: Instantly freezes the screen frame and opens an overlay toolbar to annotate without triggering underlying links or buttons.
 - **Tools**: Freehand Marker (with Catmull-Rom stroke smoothing), Directional Arrows, Framing Rectangles, Translucent Highlighter.
 - **Auto-Fade Ink**: Ephemeral ink disappearing automatically after 3.5 seconds.
 - **`F10` / `Alt + C`**: Clear all drawings instantly.
 - **`Escape` (or `Alt + D` / `F8`)**: Instantly unfreezes screen and restores interactive control via global Win32 hook.
 
-### 📱 9. Device Mockup Framing Studio
+### 📱 10. Device Mockup Framing Studio
 - Wrap your recorded tutorials inside sleek 2D/3D device frames:
   - **MacBook Pro** (Space Gray / Silver)
   - **iPhone 16 Pro** (Titanium Frame)
@@ -92,17 +102,19 @@
   - **Browser Glass Window** (Safari / Chrome dark & light header)
 - Customizable gradient / mesh backdrops and real-time GPU re-encoding.
 
-### 🔒 10. Draggable Privacy Blur Masks & Auto-Redaction
+### 🔒 11. Draggable Privacy Blur Masks & Auto-Redaction
 - Place persistent pixelation / frosted blur boxes over sensitive data (passwords, API keys, emails).
 - Move and resize blur zones directly on the live dashboard preview.
 - **Auto-Redact Video Exporter**: Batch-blur sensitive coordinates across the entire video file with client-side canvas re-encoding.
 
-### 🎞️ 11. Animated GIF Exporter
+### 🎞️ 12. Animated GIF Exporter
 - Convert screen captures or subtitled clips directly into high-framerate lightweight animated GIFs.
 - Customizable FPS (10, 15, 20, 24 fps), resolution downscaling, speed multiplier (1x, 1.25x, 1.5x, 2x), and loop count.
 
-### 🎬 12. Multi-Track Video Studio, Voiceover TTS & Audio Bin
+### 🎬 13. Multi-Track Video Studio, Native FFmpeg MP4 Export & Audio Bin
 - **Video Track**: Re-order, arrange, speed up, and trim multiple clips from your library.
+- **Native MP4 Pipeline via FFmpeg**: Ultra-fast H.264 / AAC encoding with `+faststart` for universal compatibility (Windows Media Player, QuickTime, iOS, Android, YouTube).
+- **Interactive Export Progress**: Real-time progress bar with percentage indicator and stage status (Rendering → Converting → Ready).
 - **Transitions**: Smooth *Crossfade*, *Fade to Black*, *Slide*, and *Cut*.
 - **Title & Text Track**: Customizable Intro cards, Lower-Third banners, and Outro titles with glassmorphism styles.
 - **🎙️ AI Voiceover Generator (TTS)**: Generate high-definition studio commentary from text scripts using OpenAI TTS (`nova`, `alloy`, `echo`, `shimmer`, `onyx`, `fable`) or offline Windows voices.
@@ -141,6 +153,8 @@
 
 - **Desktop Framework**: [Tauri v2](https://tauri.app) (Rust)
 - **Frontend UI**: [React 19](https://react.dev) + [TypeScript](https://www.typescriptlang.org/) + [Vite](https://vitejs.dev)
+- **AI Webcam Segmentation**: [Google MediaPipe Selfie Segmentation](https://developers.google.com/mediapipe) (WASM/TFLite, 100% offline & local)
+- **Video & MP4 Encoding**: Native FFmpeg Rust pipeline (H.264 / AAC `+faststart`), WebCodecs / MediaRecorder (VP9/VP8/H.264)
 - **Speech Recognition & TTS**: Groq Whisper Large v3, OpenAI TTS-1, Web Speech API
 - **Audio Processing**: Web Audio API (PCM silence detection, RMS analysis, BiquadFilter, DynamicsCompressor)
 - **Icons**: [Lucide React](https://lucide.dev)
@@ -181,7 +195,7 @@ npm run tauri build
 
 ## ✨ Présentation
 
-**OpenPeek** est une suite logicielle open-source d'enregistrement d'écran et de montage vidéo ultra-légère, accélérée par GPU et respectueuse de votre vie privée. Conçue avec Rust (Tauri v2) et React 19/TypeScript, elle intègre un **Curseur Studio Lissé**, un **Visualiseur de Raccourcis Clavier HUD**, un **Suppresseur Automatique de Silences**, un outil d'**Avance Rapide sur Temps de Chargement**, un **Studio de Sous-titres IA Dynamiques**, un **Générateur de Voix Off**, un **Studio Multi-Pistes**, l'**Habillage Device Mockup (MacBook, iPhone, iPad)**, une **Palette d'Annotation** et des **Masques d'Anonymisation**.
+**OpenPeek** est une suite logicielle open-source d'enregistrement d'écran et de montage vidéo ultra-légère, accélérée par GPU et respectueuse de votre vie privée. Conçue avec Rust (Tauri v2) et React 19/TypeScript, elle intègre un **Curseur Studio Lissé**, un **Visualiseur de Raccourcis Clavier HUD**, un **Suppresseur Automatique de Silences**, un outil d'**Avance Rapide sur Temps de Chargement**, un **Studio de Sous-titres IA Dynamiques**, un **Générateur de Voix Off**, le **Floutage d'Arrière-Plan & Détourage Webcam (Bokeh)**, l'**Export MP4 Haute Fidélité via FFmpeg**, un **Studio Multi-Pistes**, l'**Habillage Device Mockup (MacBook, iPhone, iPad)**, une **Palette d'Annotation** et des **Masques d'Anonymisation**.
 
 ---
 
@@ -200,19 +214,29 @@ npm run tauri build
 - **🛡️ Filtrage Intelligent** : Les raccourcis internes d'OpenPeek (`Alt+R`, `F6`, `Alt+P`, `F7`, `Alt+Z`, `F9`, `Alt+D`, `F8`, `Alt+C`, `F10`) sont automatiquement exclus pour ne pas parasiter vos tutoriels.
 - **Position Personnalisable** : *Bas Centré*, *Bas Gauche*, *Bas Droite*, ou *Haut Droite*.
 
-### ✂️ 3. Suppresseur Automatique de Silences (*Silence Remover*)
+### 🎭 3. Floutage d'Arrière-Plan & Détourage Webcam IA (*100% Hors-Ligne*)
+- **Segmentation Neurale Locale** : Intégration de Google MediaPipe Selfie Segmentation via WebAssembly et WebGL — aucun calcul dans le cloud, respect absolu de votre vie privée.
+- **4 Modes d'Arrière-Plan** :
+  - *Normal* : Flux brut de la caméra sans consommation supplémentaire.
+  - *Flou subtil (10px)* : Profondeur de champ naturelle préservant le contexte.
+  - *Flou intense (25px)* : Effet portrait/bokeh prononcé masquant l'arrière-plan.
+  - *Détourage (Suppression)* : Fond transparent sans besoin de fond vert physique.
+- **Formes de Bulle & Halos Lumineux** : Compatible avec les formats cercle, squircle ou rectangle et les bordures néon lumineuses.
+- **Préchauffage Transparent** : Démarrage fluide sans scintillement ni écran noir.
+
+### ✂️ 4. Suppresseur Automatique de Silences (*Silence Remover*)
 - **Analyse Acoustique Web Audio** : Détection ultra-rapide des baisses de niveau d'énergie (RMS/dB) sur le flux audio pour repérer les pauses orales.
 - **Réglages Fin de Détection** : Seuil de silence (`-50 dB` à `-20 dB`), durée minimale du blanc (`0.3s` à `1.5s`) et marge vocale de sécurité (*Padding* de `50 ms` à `250 ms`) pour ne jamais trancher une syllabe.
 - **Frise Visuelle Interactive** : Visualisation couleur (cyan pour la voix, rouge pour les pauses coupées) avec pourcentage de durée économisée.
 - **Découpage en 1 Clic** : Transforme instantanément un clip brut en séquence rythmée dans le Studio de Montage et le Rognage.
 
-### ⏩ 4. Avance Rapide Intelligente sur les Temps de Chargement
+### ⏩ 5. Avance Rapide Intelligente sur les Temps de Chargement
 - **Multiplicateur de Vitesse par Clip** : Accélérez les temps d'attente (`npm install`, compilation, chargement web) en **`2x`**, **`4x`**, **`8x`** ou **`16x Hyper-Vitesse`**.
 - **Outil 1 Clic `⏩ 4x`** : Découpe automatiquement la section centrale de chargement d'un clip et lui applique l'accélération 4x en un seul geste.
 - **Synchronisation Automatique de la Timeline** : La durée du clip et la durée totale du projet sont instantanément recalculées selon la vitesse.
 - **Macaron Visuel Neon** : Incrustation animée **`⏩ Nx FAST-FORWARD`** en haut à droite lors de la lecture et sur la vidéo exportée.
 
-### 🎙️ 5. Studio de Sous-titres & Captions Dynamiques (IA)
+### 🎙️ 6. Studio de Sous-titres & Captions Dynamiques (IA)
 - **Transcription Ultra-Rapide Whisper** : Transcrivez l'audio de vos vidéos en moins de 2 secondes avec Groq Whisper ou OpenAI.
 - **Animations de Mots Dynamiques (Pop / Rebond / Zoom)** : Effet cinétique mot à mot (style Hormozi / TikTok, rebond vertical fluide ou mise en avant focalisée).
 - **Découpage Punchy (3-4 mots)** : Segmente automatiquement les prises de parole en blocs courts avec horodatages précis mot à mot.
@@ -220,7 +244,7 @@ npm run tauri build
 - **🌐 Traduction Multilingue en 1 clic** : Traduisez vos sous-titres dans plus de 10 langues en conservant le minutage exact.
 - **Import / Export SRT & VTT** : Chargez vos fichiers existants ou exportez vos sous-titres en un clic.
 
-### 🎥 6. Enregistrement Écran, Raccourcis Globaux & Audio
+### 🎥 7. Enregistrement Écran, Raccourcis Globaux & Audio
 - **Raccourcis Clavier Partout sous Windows** :
   - **`F6`** ou **`Alt + R`** : Démarrer / Arrêter l'enregistrement à tout moment.
   - **`F7`** ou **`Alt + P`** : Mettre en Pause / Reprendre la capture.
@@ -229,21 +253,21 @@ npm run tauri build
 - **Support Multi-Écrans** : Détection automatique des moniteurs secondaires sous Windows.
 - **Mixage Audio Indépendant** : Enregistrez simultanément le microphone (voix) et le son système (bureau).
 - **Filtres DSP Audio Intelligents** : Filtre passe-haut anti-ronflement et rehausseur de présence vocale.
-- **Facecam Déplaçable** : Bulle caméra circulaire avec aperçu en direct, mode miroir et halo néon personnalisé.
+- **Facecam Déplaçable** : Bulle caméra circulaire avec aperçu en direct, mode miroir, halo néon personnalisé et floutage d'arrière-plan.
 - **Ondes de Clics Visuelles** : Animation circulaire néon sous le curseur à chaque clic gauche/droit.
 
-### 🔍 7. Zoom Dynamique au Curseur
+### 🔍 8. Zoom Dynamique au Curseur
 - **`F9` / `Alt + Z`** : Zoome à 200% centré instantanément sur la position de la souris.
 - **Indicateurs Mono-Écran** : Bip audio distinctif (grave/aigu) et macaron d'angle discret pour confirmer l'état du zoom en temps réel.
 
-### ✏️ 8. Feutre & Annotation sur Écran Figé (*Freeze & Draw*)
+### ✏️ 9. Feutre & Annotation sur Écran Figé (*Freeze & Draw*)
 - **`F8` / `Alt + D`** : Fige l'écran instantanément et active la palette de dessin sans cliquer par inadvertance sur vos applications.
 - **Outils** : Feutre libre (lissage Catmull-Rom fluide), Flèches directionnelles, Rectangles d'encadrement, Surligneur translucide.
 - **Encre Éphémère (Auto-Fade)** : Les traits s'effacent automatiquement après 3.5 secondes.
 - **`F10` / `Alt + C`** : Tout effacer d'un coup.
 - **`Échap` (ou `Alt + D` / `F8`)** : Dégèle l'écran instantanément et redonne le contrôle interactif grâce au hook global Win32.
 
-### 📱 9. Studio d'Habillage Mockup Device
+### 📱 10. Studio d'Habillage Mockup Device
 - Intégrez vos vidéos dans des cadres d'appareils élégants :
   - **MacBook Pro** (Gris sidéral / Argent)
   - **iPhone 16 Pro** (Cadre Titane)
@@ -251,17 +275,19 @@ npm run tauri build
   - **Fenêtre de Navigateur Dépolie** (Header Safari / Chrome clair ou sombre)
 - Arrière-plans dégradés / mesh modernes et rendu GPU direct.
 
-### 🔒 10. Masques de Confidentialité Déplaçables & Auto-Redaction
+### 🔒 11. Masques de Confidentialité Déplaçables & Auto-Redaction
 - Posez des rectangles de flou permanent sur vos données sensibles (mots de passe, clés d'API, emails).
 - Déplacez et redimensionnez la zone de flou directement sur le tableau de bord.
 - **Export Anonymisé** : Ré-encode la vidéo avec floutage automatique des zones définies.
 
-### 🎞️ 11. Exportateur GIF Animé
+### 🎞️ 12. Exportateur GIF Animé
 - Convertissez vos captures ou extraits sous-titrés en GIFs légers et fluides.
 - Choix de la cadence (10 à 24 FPS), échelle de résolution, multiplicateur de vitesse et bouclage.
 
-### 🎬 12. Studio de Montage Multi-Pistes, Voix Off IA & Chutier Audio
+### 🎬 13. Studio de Montage Multi-Pistes, Export MP4 Natif FFmpeg & Chutier Audio
 - **Piste Vidéo** : Assemblez plusieurs captures issues de votre bibliothèque, changez l'ordre, accélérez et rognez les clips.
+- **Pipeline MP4 Natif via FFmpeg** : Encodage ultra-rapide H.264 / AAC avec `+faststart` pour une compatibilité universelle (Windows Media Player, QuickTime, iOS, Android, YouTube).
+- **Barre de Progression en Temps Réel** : Suivi visuel du rendu et de la conversion avec affichage dynamique du pourcentage et de l'état.
 - **Transitions** : *Fondu enchaîné*, *Fondu au noir*, *Balayage*, *Coupure*.
 - **Piste Titres & Textes** : Cartons d'intro, bandeaux inférieurs (*lower-thirds*) et cartons de fin personnalisables.
 - **🎙️ Générateur de Voix Off IA (Text-to-Speech)** : Créez des commentaires de qualité studio à partir de scripts textuels avec OpenAI TTS (`nova`, `alloy`, `echo`, `shimmer`, `onyx`, `fable`) ou les voix locales Windows gratuites.
