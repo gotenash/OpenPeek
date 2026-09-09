@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { webcamSegmenter } from '../utils/webcamSegmenter';
+import { testElevenLabsApiKey } from '../utils/ttsEngine';
 
 interface SettingsPanelProps {
   options: RecorderOptions;
@@ -39,10 +40,21 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
     return localStorage.getItem('openpeek_openai_key') || 
       (localStorage.getItem('openpeek_whisper_service') === 'openai' ? localStorage.getItem('openpeek_whisper_key') || '' : '');
   });
+  const [elevenLabsKey, setElevenLabsKey] = useState<string>(() => {
+    return localStorage.getItem('openpeek_elevenlabs_key') || '';
+  });
   const [showGroqKey, setShowGroqKey] = useState<boolean>(false);
   const [showOpenaiKey, setShowOpenaiKey] = useState<boolean>(false);
+  const [showElevenLabsKey, setShowElevenLabsKey] = useState<boolean>(false);
   const [testStatusGroq, setTestStatusGroq] = useState<{ state: 'idle' | 'testing' | 'success' | 'error'; message?: string }>({ state: 'idle' });
   const [testStatusOpenai, setTestStatusOpenai] = useState<{ state: 'idle' | 'testing' | 'success' | 'error'; message?: string }>({ state: 'idle' });
+  const [testStatusElevenLabs, setTestStatusElevenLabs] = useState<{
+    state: 'idle' | 'testing' | 'success' | 'error';
+    message?: string;
+    tier?: string;
+    used?: number;
+    limit?: number;
+  }>({ state: 'idle' });
   const [saveSuccessNotice, setSaveSuccessNotice] = useState<boolean>(false);
 
   const testGroqKey = async () => {
@@ -97,10 +109,43 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
     }
   };
 
-  const handleSaveApiSettings = (newService = whisperService, newGroq = groqKey, newOpenai = openaiKey) => {
+  const testElevenLabsKey = async () => {
+    if (!elevenLabsKey.trim()) return;
+    setTestStatusElevenLabs({ state: 'testing' });
+    try {
+      const result = await testElevenLabsApiKey(elevenLabsKey.trim());
+      if (result.valid) {
+        setTestStatusElevenLabs({
+          state: 'success',
+          message: `${t('settings.api.testSuccess')} (Plan : ${result.tier || 'Gratuit'})`,
+          tier: result.tier,
+          used: result.charactersUsed,
+          limit: result.characterLimit
+        });
+      } else {
+        setTestStatusElevenLabs({
+          state: 'error',
+          message: `${t('settings.api.testError')}${result.message || 'Clé invalide'}`
+        });
+      }
+    } catch (e: any) {
+      setTestStatusElevenLabs({
+        state: 'error',
+        message: `${t('settings.api.testError')}${e?.message || e}`
+      });
+    }
+  };
+
+  const handleSaveApiSettings = (
+    newService = whisperService,
+    newGroq = groqKey,
+    newOpenai = openaiKey,
+    newEleven = elevenLabsKey
+  ) => {
     localStorage.setItem('openpeek_whisper_service', newService);
     localStorage.setItem('openpeek_groq_key', newGroq.trim());
     localStorage.setItem('openpeek_openai_key', newOpenai.trim());
+    localStorage.setItem('openpeek_elevenlabs_key', newEleven.trim());
 
     // Synchronize openpeek_whisper_key for backward compatibility
     const activeKey = newService === 'groq' ? newGroq.trim() : newOpenai.trim();
@@ -114,11 +159,14 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
     if (window.confirm(t('settings.api.clearConfirm'))) {
       setGroqKey('');
       setOpenaiKey('');
+      setElevenLabsKey('');
       localStorage.removeItem('openpeek_groq_key');
       localStorage.removeItem('openpeek_openai_key');
       localStorage.removeItem('openpeek_whisper_key');
+      localStorage.removeItem('openpeek_elevenlabs_key');
       setTestStatusGroq({ state: 'idle' });
       setTestStatusOpenai({ state: 'idle' });
+      setTestStatusElevenLabs({ state: 'idle' });
       setSaveSuccessNotice(false);
     }
   };
@@ -1810,12 +1858,139 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
             </div>
           </div>
 
+          {/* ElevenLabs Key Configuration Card */}
+          <div className="glass-panel settings-card" style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '16px' }}>✨</span>
+                <div>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: '#f1f5f9' }}>{t('settings.api.elevenlabsKeyLabel')}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('settings.api.elevenlabsFreeQuota')}</div>
+                </div>
+              </div>
+              <span style={{
+                fontSize: '11px',
+                padding: '3px 10px',
+                borderRadius: '12px',
+                fontWeight: 600,
+                background: elevenLabsKey.trim() ? 'rgba(192, 132, 252, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                color: elevenLabsKey.trim() ? '#c084fc' : 'var(--text-secondary)',
+                border: elevenLabsKey.trim() ? '1px solid rgba(192, 132, 252, 0.4)' : '1px solid var(--border-color)'
+              }}>
+                {elevenLabsKey.trim() ? t('settings.api.keyConfigured') : t('settings.api.keyNotConfigured')}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <input
+                  type={showElevenLabsKey ? 'text' : 'password'}
+                  className="form-input"
+                  placeholder={t('settings.api.elevenlabsKeyPlaceholder')}
+                  value={elevenLabsKey}
+                  onChange={(e) => {
+                    setElevenLabsKey(e.target.value);
+                    handleSaveApiSettings(whisperService, groqKey, openaiKey, e.target.value);
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '8px 38px 8px 12px',
+                    fontSize: '13px',
+                    fontFamily: 'monospace',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowElevenLabsKey(!showElevenLabsKey)}
+                  title={showElevenLabsKey ? t('settings.api.hideKey') : t('settings.api.showKey')}
+                  style={{
+                    position: 'absolute',
+                    right: '8px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '4px'
+                  }}
+                >
+                  {showElevenLabsKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+
+              <button
+                type="button"
+                className="btn-toolbar"
+                onClick={testElevenLabsKey}
+                disabled={!elevenLabsKey.trim() || testStatusElevenLabs.state === 'testing'}
+                style={{
+                  padding: '8px 14px',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  minWidth: '110px',
+                  justifyContent: 'center',
+                  color: '#c084fc',
+                  borderColor: 'rgba(192, 132, 252, 0.4)'
+                }}
+              >
+                {testStatusElevenLabs.state === 'testing' ? (
+                  <>
+                    <RefreshCw size={14} className="spin" />
+                    <span>{t('settings.api.testing')}</span>
+                  </>
+                ) : (
+                  <span>{t('settings.api.testConnection')}</span>
+                )}
+              </button>
+            </div>
+
+            {/* Test Status feedback */}
+            {testStatusElevenLabs.state === 'success' && (
+              <div style={{ padding: '8px 12px', borderRadius: '6px', background: 'rgba(192, 132, 252, 0.1)', border: '1px solid rgba(192, 132, 252, 0.3)', color: '#c084fc', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
+                  <CheckCircle2 size={16} />
+                  <span>{testStatusElevenLabs.message}</span>
+                </div>
+                {testStatusElevenLabs.limit !== undefined && (
+                  <div style={{ fontSize: '11px', color: '#e2e8f0', marginLeft: '24px' }}>
+                    Quota utilisé ce mois-ci : <strong>{testStatusElevenLabs.used?.toLocaleString() ?? 0} / {testStatusElevenLabs.limit?.toLocaleString()}</strong> caractères ({Math.max(0, (testStatusElevenLabs.limit ?? 10000) - (testStatusElevenLabs.used ?? 0)).toLocaleString()} restants)
+                  </div>
+                )}
+              </div>
+            )}
+            {testStatusElevenLabs.state === 'error' && (
+              <div style={{ padding: '8px 12px', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertCircle size={16} />
+                <span>{testStatusElevenLabs.message}</span>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)' }}>
+              <span>{t('settings.api.elevenlabsKeyHelp')}</span>
+              <a
+                href="https://elevenlabs.io"
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: '#c084fc', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}
+              >
+                <span>elevenlabs.io (Plan Gratuit)</span>
+                <ExternalLink size={12} />
+              </a>
+            </div>
+          </div>
+
           {/* Action Row & Clear */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
             <button
               type="button"
               onClick={handleClearKeys}
-              disabled={!groqKey.trim() && !openaiKey.trim()}
+              disabled={!groqKey.trim() && !openaiKey.trim() && !elevenLabsKey.trim()}
               className="btn-toolbar"
               style={{
                 color: '#f87171',

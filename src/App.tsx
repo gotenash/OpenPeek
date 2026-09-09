@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Component, type ReactNode, type ErrorInfo, useState } from 'react';
 import { useRecorder, type RecorderOptions } from './hooks/useRecorder';
 import { RecorderDashboard } from './components/RecorderDashboard';
 import { VideoLibrary } from './components/VideoLibrary';
@@ -6,6 +6,7 @@ import { DrawingCanvas } from './components/DrawingCanvas';
 import { SettingsPanel } from './components/SettingsPanel';
 import { OverlayCanvas } from './components/OverlayCanvas';
 import { VideoEditorStudio } from './components/VideoEditorStudio';
+import { TeleprompterModal } from './components/TeleprompterModal';
 import { I18nProvider, useI18n } from './i18n/I18nContext';
 import { 
   Video, 
@@ -14,14 +15,102 @@ import {
   PenTool, 
   Globe, 
   Clapperboard,
-  Languages
+  Languages,
+  ScrollText
 } from 'lucide-react';
 import './App.css';
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  fallbackTitle?: string;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+export class StudioErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("StudioErrorBoundary caught an error:", error, errorInfo);
+  }
+
+  handleReset = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '380px',
+          padding: '30px',
+          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+          border: '1px solid rgba(239, 68, 68, 0.4)',
+          borderRadius: '12px',
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.85), 0 0 30px rgba(239, 68, 68, 0.2)',
+          color: '#f8fafc',
+          textAlign: 'center',
+          margin: '20px'
+        }}>
+          <div style={{ fontSize: '32px', marginBottom: '12px' }}>⚠️</div>
+          <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#f87171', marginBottom: '8px' }}>
+            {this.props.fallbackTitle || "Une anomalie est survenue dans le Studio de Montage"}
+          </h2>
+          <p style={{ fontSize: '13px', color: '#94a3b8', maxWidth: '560px', marginBottom: '16px', lineHeight: 1.5 }}>
+            Une erreur d'affichage a été interceptée afin d'éviter la fermeture ou l'écran vide de l'application.
+          </p>
+          <div style={{
+            width: '100%',
+            maxWidth: '620px',
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '6px',
+            padding: '12px',
+            textAlign: 'left',
+            fontFamily: 'monospace',
+            fontSize: '11px',
+            color: '#fca5a5',
+            maxHeight: '140px',
+            overflowY: 'auto',
+            marginBottom: '20px',
+            wordBreak: 'break-word',
+            whiteSpace: 'pre-wrap'
+          }}>
+            {this.state.error?.message || String(this.state.error)}
+          </div>
+          <button
+            onClick={this.handleReset}
+            className="btn-primary"
+            style={{ padding: '8px 20px', fontSize: '13px' }}
+          >
+            🔄 Réessayer
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function MainApp() {
   const { t, language, setLanguage } = useI18n();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'whiteboard' | 'library' | 'editor' | 'settings'>('dashboard');
   const [libraryRefreshTrigger, setLibraryRefreshTrigger] = useState(0);
+  const [isTeleprompterOpen, setIsTeleprompterOpen] = useState(false);
 
   // Recorder configurations state
   const [options, setOptions] = useState<RecorderOptions>({
@@ -94,7 +183,11 @@ function MainApp() {
           />
         );
       case 'editor':
-        return <VideoEditorStudio />;
+        return (
+          <StudioErrorBoundary>
+            <VideoEditorStudio />
+          </StudioErrorBoundary>
+        );
       case 'settings':
         return (
           <SettingsPanel 
@@ -218,6 +311,21 @@ function MainApp() {
               <Settings size={18} />
               {t('nav.settings')}
             </button>
+
+            <button 
+              className="nav-item"
+              onClick={() => setIsTeleprompterOpen(true)}
+              style={{
+                marginTop: '10px',
+                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(59, 130, 246, 0.15) 100%)',
+                border: '1px solid rgba(139, 92, 246, 0.3)',
+                color: '#c4b5fd'
+              }}
+              title="Ouvrir le Téléprompteur flottant & gestionnaire de scripts"
+            >
+              <ScrollText size={18} />
+              {t('nav.teleprompter')}
+            </button>
           </nav>
         </div>
 
@@ -316,15 +424,45 @@ function MainApp() {
 
       {/* Main Panel Content Area */}
       <main className="main-content">
-        <header className="page-header">
-          <h1 className="page-title">{meta.title}</h1>
-          <p className="page-subtitle">{meta.subtitle}</p>
+        <header className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h1 className="page-title">{meta.title}</h1>
+            <p className="page-subtitle">{meta.subtitle}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsTeleprompterOpen(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px 16px',
+              borderRadius: '10px',
+              background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.18) 0%, rgba(59, 130, 246, 0.18) 100%)',
+              border: '1px solid rgba(139, 92, 246, 0.35)',
+              color: '#c4b5fd',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 600,
+              boxShadow: '0 2px 10px rgba(139, 92, 246, 0.12)',
+              transition: 'all 0.2s ease'
+            }}
+            title="Ouvrir le Téléprompteur avec défilement automatique et calcul du temps de parole"
+          >
+            <ScrollText size={16} />
+            <span>{t('nav.teleprompter')}</span>
+          </button>
         </header>
 
         <section style={{ flexGrow: 1 }}>
           {renderContent()}
         </section>
       </main>
+
+      {/* Floating Teleprompter Modal */}
+      {isTeleprompterOpen && (
+        <TeleprompterModal onClose={() => setIsTeleprompterOpen(false)} />
+      )}
     </div>
   );
 }
@@ -343,7 +481,13 @@ export default function App() {
 
   return (
     <I18nProvider>
-      {isOverlayWindow ? <OverlayCanvas /> : <MainApp />}
+      {isOverlayWindow ? (
+        <OverlayCanvas />
+      ) : (
+        <StudioErrorBoundary fallbackTitle="Une anomalie est survenue dans l'application">
+          <MainApp />
+        </StudioErrorBoundary>
+      )}
     </I18nProvider>
   );
 }

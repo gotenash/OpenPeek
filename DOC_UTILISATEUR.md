@@ -21,8 +21,14 @@ Ce document vous guide pas à pas dans la découverte et la maîtrise de toutes 
 11. [📱 Habillage Mockup d'Appareils (*Device Frames*)](#-11-habillage-mockup-dappareils-device-frames)
 12. [🔒 Masquage & Censure de Confidentialité (*Auto-Redact*)](#-12-masquage--censure-de-confidentialité-auto-redact)
 13. [💾 Exportation & GIF Animé](#-13-exportation--gif-animé)
-14. [🛡️ Confidentialité & Données Locales](#️-14-confidentialité--données-locales)
-15. [🖥️ Spécifications & Prérequis Matériels (GPU, CPU, RAM)](#️-15-spécifications--prérequis-matériels-gpu-cpu-ram)
+14. [📜 Le Téléprompteur Flottant & Outil de Script](#-14-le-téléprompteur-flottant--outil-de-script)
+15. [📖 Le Générateur de Guide Pas-à-Pas (Markdown, HTML & PDF)](#-15-le-générateur-de-guide-pas-à-pas-markdown-html--pdf)
+16. [🔖 Les Chapitres YouTube dans le Studio](#-16-les-chapitres-youtube-dans-le-studio)
+17. [🖼️ Incrustation d'Images, Logos & Filigranes](#️-17-incrustation-dimages-logos--filigranes)
+18. [🎭 Floutage d'Arrière-Plan & Fonds Virtuels Webcam (Bokeh / Chroma Key)](#-18-floutage-darrière-plan--fonds-virtuels-webcam-bokeh--chroma-key)
+19. [📁 Organisation de la Bibliothèque Locale (Projets & Filtres Médias)](#-19-organisation-de-la-bibliothèque-locale-projets--filtres-médias)
+20. [🛡️ Confidentialité & Données Locales](#️-20-confidentialité--données-locales)
+21. [🖥️ Spécifications & Prérequis Matériels (GPU, CPU, RAM)](#️-21-spécifications--prérequis-matériels-gpu-cpu-ram)
 
 ---
 
@@ -138,18 +144,78 @@ Besoin d'expliquer un détail ou d'entourer un code à l'écran ?
 
 Cliquez sur l'onglet **Studio de Montage** dans le menu latéral gauche :
 
-- **Timeline Multi-Pistes Complète** :
-  - **Piste 1 (🔤 Titres & Cartons)** : Superposition de bandeaux inférieurs (*Lower Third*) ou d'écrans de titre d'intro/outro personnalisables.
-  - **Piste 2 (🎬 Vidéos & Transitions)** : Enchaînement de clips avec raccords, vitesse variable et transitions fluides (Cut, Fondu enchaîné, Fondu au noir, Glissement).
-  - **Piste 3 (🎵 Musique de Fond & Auto-Ducking)** :
-    - Générateur d'ambiances synthétiques relaxantes (Lofi, Synthwave, Chill, Focus) ou import de fichiers audio personnels (`.mp3`, `.wav`).
-    - **Auto-Ducking Intelligent** : Baisse automatiquement le volume de la musique (à ~20%) dès que vous parlez ou qu'un son vidéo est présent, et rétablit le niveau musical en douceur pendant les respirations et silences.
-  - **Piste 4 (🔍 Zooms Dynamiques Studio)** :
-    - Ajoutez des effets de zoom ciblés façon *Screen Studio* directement sur la timeline.
-    - **Grille 3x3 intuitive** : Choisissez la zone d'attention (Haut Gauche, Centre, Bas Droite, etc.).
-    - **Facteur d'échelle** : `1.5x`, `2.0x` ou `2.5x`.
-    - **Transitions fluides** : Zoom avant et retour avec lissage sinusoïdal cinématique (*easing* fluide).
-- **Lecture et Scrubbing Interactif** : Prévisualisation temps réel avec rendu immédiat des zooms, titres et mixage musical.
+### A. Les 3 Modes d'Affichage & Règle Temporelle Maîtresse
+En haut à droite de la timeline, basculez selon vos préférences de travail :
+- **📐 Vue Piste Alignée (Recommandée par défaut)** :
+  - La piste vidéo principale est **100 % proportionnelle au temps** (`0%` à `100%`) et parfaitement alignée avec les pistes de Titres, Logos et Zooms.
+  - **Tête de lecture continue & unifiée** : Le repère violet néon traverse la règle temporelle et la piste vidéo de façon parfaitement synchrone avec le lecteur vidéo.
+  - **Surbrillance du clip actif** : Le clip (vidéo, diapositive ou image) en cours de lecture s'illumine automatiquement d'une bordure cyan électrique éclatante.
+  - **Inspecteur de Clip Dédié** : Cliquez sur n'importe quel clip sur la piste vidéo pour ouvrir instantanément sous la piste ses réglages complets (rognage début/fin, vitesse d'avance rapide, suppression automatique des silences, modification de style pour les diapositives, transition vers le clip suivant et aperçu des photogrammes).
+- **🎞️ Vue Vignettes Dépliées (Filmstrip)** :
+  - Déplie côte-à-côte l'ensemble des photogrammes de chaque clip de la timeline avec boutons d'insertion rapide au survol (`+🔤`, `+🖼️`, `+🔍`, `+🔖`).
+- **📋 Cartes Compactes** :
+  - Mode condensé épuré pour une gestion globale des très longs projets comportant des dizaines de clips.
+
+### B. Règle Temporelle Maîtresse & Navigation Libre (*Scrubbing*)
+- Une règle de timecode graduée (ex: `00:00`, `00:10`, `00:20`...) surmonte l'ensemble des pistes avec un curseur triangulaire violet.
+- **Scrubbing instantané** : Cliquez ou glissez votre curseur de souris n'importe où sur la règle ou directement sur la piste vidéo pour parcourir fluidement toute votre vidéo en direct sans à-coups.
+
+### B. Les 6 Pistes de Montage & Chronologie Interactive Spatiale
+L'éditeur multi-pistes place désormais la piste vidéo en haut comme référence maîtresse, avec les pistes secondaires calées sur la durée totale du projet :
+- **Piste 1 (🎬 Vidéos, Diapositives Titres & Images Plein Écran)** :
+  - **Clips Vidéos** : Enchaînement de vos captures avec raccords (Trim), vitesse variable (jusqu'à 8x) et transitions fluides (Cut, Fondu enchaîné, Fondu au noir, Glissement).
+  - **📑 Diapositives Titres (Cartons d'introduction et de chapitres)** :
+    - Insérez un carton de titre directement sur la piste principale via le bouton **`+ Diapo`** (dans la barre de transport ou l'en-tête de la piste).
+    - Choisissez où insérer le carton : au début du projet (idéal pour introduire la vidéo), après le clip sélectionné, ou à la fin.
+    - **Personnalisation complète** : Titre, sous-titre, taille de police, alignement (Gauche, Centre, Droite), durée d'affichage, et sélection de thèmes de couleurs modernes (*Nuit Bleutée, Cyber Violet, Océan Cyan, Émeraude Sombre, Ambre Chaud, Rouge Cinéma, Noir Pur*).
+    - **Image d'arrière-plan** : Possibilité d'utiliser une photo de votre chutier comme fond de la diapositive avec assombrissement cinématique automatique pour préserver la lisibilité du texte.
+    - **Réédition instantanée** : Cliquez sur le bouton **`⚙️ Style`** directement sur le clip de diapositive pour ajuster le texte ou le dégradé à tout moment.
+  - **🖼️ Diapositives Images Plein Écran** :
+    - Diffusez une photo, un schéma technique, une infographie ou une capture d'écran directement comme un clip de la timeline sans avoir à créer un faux fichier vidéo.
+    - Insérez en 1 clic via le bouton **`🎬 Diapo`** dans l'onglet **Images** du Chutier, ou via **`+ Image`** dans l'en-tête de la piste vidéo.
+    - Ajustez la durée d'affichage (ex. 3s, 5s, 10s) par simple clic sur les touches `-1s` / `+1s`.
+  - **Rendu Unifié & Transitions** :
+    - Les diapositives et images bénéficient des mêmes transitions de fondu croisé (*crossfade*), fondu au noir (*fade-to-black*) et glissement (*slide*) que les clips vidéos.
+    - Visibilité parfaite en lecture continue, en pause et lors de l'exportation vidéo finale.
+- **Piste 2 (🔤 Titres & Textes Chronologiques)** :
+  - **Voie spatiale proportionnelle** : Vos bandeaux et titres sont placés directement sous la vidéo sur une frise temporelle continue alignée sur la durée totale.
+  - **Déplacement libre à la souris (*Drag to Move*)** : Glissez le bloc vers la gauche ou la droite pour caler instantanément le titre au bon moment dans la vidéo.
+  - **Étirement de la durée (*Drag to Stretch*)** : Saisissez la poignée droite pour étirer la durée ou la poignée gauche pour ajuster le début avec retour visuel du timecode en temps réel.
+  - Bouton **`⚙️`** pour rééditer le texte, le style ou la couleur en 1 clic.
+- **Piste 3 (🖼️ Images, Logos & Filigranes Chronologiques)** :
+  - Calage visuel direct sous la vidéo avec miniature du logo.
+  - **Déplacement & Étirement fluide** : Positionnez votre logo exactement sur les scènes désirées et étirez sa durée à la souris.
+  - Bouton **`⚙️`** pour ajuster la position sur l'écran (5 presets ou libre), l'opacité, l'ombre portée et les coins arrondis.
+- **Piste 4 (🔍 Zooms Dynamiques Studio)** :
+  - Voie temporelle pour caler les zooms cinématiques ciblés (*Screen Studio*), avec étirement de la durée de focalisation et réglage du cadrage (Grille 3x3 et facteur `1.5x` à `2.5x`).
+- **Piste 5 (🎵 Musique de Fond & Auto-Ducking)** :
+  - Ambiances sonores synthétiques relaxantes (Lofi, Synthwave, Chill, Focus) ou import de fichiers audio personnels (`.mp3`, `.wav`).
+  - **Auto-Ducking Intelligent** : Baisse automatiquement le volume de la musique (à ~20%) dès que vous parlez ou qu'un son vidéo est présent, et rétablit le niveau musical en douceur pendant les respirations et silences.
+- **Piste 6 (🔖 Chapitres Vidéo)** :
+  - Repères temporels interactifs synchronisés avec l'outil de génération et d'exportation YouTube.
+- **Aiguille de lecture synchronisée (*Playhead Indicator*)** :
+  - Une ligne verticale mauve traverse toutes les pistes pour visualiser instantanément où se situe la tête de lecture.
+  - Cliquez n'importe où sur une piste pour sauter immédiatement à cet instant.
+
+### C. Moniteur Vidéo Agrandissable & Mode Plein Écran Cinéma
+- **Zone d'aperçu redimensionnable** :
+  - Ajustez la hauteur du moniteur en 1 clic grâce aux préréglages dédiés :
+    - **`260px` (Compact)** : Idéal sur les petits écrans d'ordinateurs portables pour maximiser l'espace timeline.
+    - **`380px` (Standard Recommandé)** : Format large et confortable (70% plus grand), parfait pour peaufiner les animations, textes et incrustations avec un rendu 16:9 cristallin.
+    - **`520px` (Grand Cinéma)** : Aperçu géant occupant toute la largeur disponible pour un contrôle visuel haute fidélité.
+  - Le chutier multimédia (vidéos, images, audios) s'adapte automatiquement à la hauteur choisie.
+  - Votre préférence de taille est mémorisée automatiquement sur votre PC.
+- **Mode Plein Écran Cinéma (`Fullscreen`)** :
+  - Cliquez sur le bouton **`⛶ Plein écran`** (ou appuyez sur la touche **`F`**, ou double-cliquez directement sur la vidéo) pour basculer en plein écran immersif.
+  - **HUD de contrôle cinéma flottant** :
+    - Grand bouton **Lecture / Pause** (contrôlable aussi avec la barre **Espace**).
+    - Touches **`-1s`** et **`+1s`** (accessibles avec les **Flèches Gauche / Droite** du clavier, ou `Shift + Flèches` pour des sauts de 5s).
+    - **Barre de défilement scrub intégrale** avec affichage précis du temps.
+    - **Badges d'éléments actifs** : Voyants visuels signalant en direct la présence de titres (`🔤`), zooms (`🔍`) ou logos (`🖼️`) au moment de la lecture.
+    - Quittez le plein écran à tout moment avec **`Échap`**, la touche **`F`**, ou par double-clic sur l'écran.
+
+### D. Lecture, Scrubbing & Sauvegarde
+- **Scrubbing Interactif** : Déplacez la tête de lecture sur la timeline pour inspecter image par image vos transitions et superpositions.
 - **Sauvegarde de Projets** : Enregistrez et réouvrez vos montages dans la base locale (`.captproj` ou IndexedDB).
 
 ---
@@ -193,8 +259,46 @@ Pendant un tutoriel, une compilation de code, une installation de dépendances o
    - **Traduction Multilingue en 1 Clic** : Traduisez instantanément vos sous-titres en anglais, espagnol, allemand, italien, etc.
    - **Export SRT / VTT** : Téléchargez les sous-titres au format standard pour vos plateformes vidéo.
 
-### B. Générateur de Voix-Off IA (TTS)
-- Remplacez votre voix ou ajoutez un commentaire audio impeccable généré par IA à partir d'un script textuel.
+### B. Enregistrement de Voix Off en Direct (Microphone) avec Défilement Vidéo
+Vous souhaitez commenter votre vidéo en direct pendant qu'elle défile sur le moniteur ? OpenPeek intègre un studio complet d'enregistrement de voix off synchronisée :
+
+1. **Démarrer l'enregistrement vocal** :
+   - Placez la tête de lecture à l'endroit souhaité sur la timeline.
+   - Cliquez sur le bouton **`🔴 Voix Off`** dans la barre de contrôle (disponible en mode standard et en mode plein écran cinéma).
+   - La vidéo démarre sa lecture immédiatement et votre microphone enregistre votre voix.
+   - Un badge clignotant **`🔴 ENREGISTREMENT VOIX OFF • 00:04`** s'affiche en surimpression sur le moniteur vidéo.
+2. **Arrêter l'enregistrement** :
+   - Cliquez sur **`⏹️ Arrêter Micro`** (ou mettez la lecture en pause avec la barre `Espace`).
+   - Le micro est libéré et un bloc audio vocal est automatiquement créé sur la piste chronologique dédiée **Voix Off (Micro)**.
+3. **Piste Dédiée « Voix Off (Micro) » sur la Timeline** :
+   - Positionnée au-dessus des Titres, elle conserve un en-tête standardisé de `160px` pour un alignement irréprochable de la tête de lecture.
+   - Déplacez le bloc audio à la souris pour recaler votre commentaire.
+   - Ajustez sa durée via la poignée droite.
+   - Cliquez sur l'icône **⚙️ (Options)** pour réécouter l'extrait vocal et régler le volume individuel (de `0 %` à `200 %`).
+4. **Auto-Ducking & Mixage Intelligent** :
+   - Dès que votre voix off commence à parler, la musique de fond diminue automatiquement son volume sonore pour laisser votre voix parfaitement audible.
+   - À l'exportation finale, les prises de voix off sont mixées dans le flux audio MP4 (H.264/AAC) ou WebM.
+
+---
+
+### C. Générateur de Voix-Off IA (Text-to-Speech)
+Si vous préférez générer un commentaire vocal professionnel à partir d'un script écrit sans utiliser votre propre micro :
+
+1. Dans l'onglet **Audio** du chutier, cliquez sur **🎙️ Voix Off IA**.
+2. Saisissez ou collez votre script dans la zone de texte.
+3. Choisissez votre fournisseur parmi les 3 options disponibles :
+   - **✨ ElevenLabs (Gratuit 10 000 caractères/mois)** :
+     - Rendu ultra-réaliste avec le modèle `eleven_multilingual_v2` (intonations, respirations et accents naturels en français).
+     - **Forfait 100 % gratuit à vie** de 10 000 caractères par mois offert à l'inscription sur [elevenlabs.io](https://elevenlabs.io) (sans carte bancaire requise).
+     - Choix parmi 8 timbres de voix d'élite : *Rachel* (calme), *Adam* (narratif), *Antoni* (posé), *Bella* (douce), *Arnold* (dynamique), *Domi* (énergique), *Josh* (jeune), *Dorothy* (convaincante).
+     - Affichage en direct du nombre exact de caractères gratuits restants pour le mois.
+   - **🤖 OpenAI TTS** :
+     - Modèle `tts-1` avec 6 voix de studio (*Nova, Alloy, Echo, Shimmer, Onyx, Fable*).
+     - Nécessite une clé API OpenAI avec des crédits prépayés.
+   - **💻 Windows Local (100% Hors-Ligne & Gratuit)** :
+     - Synthèse vocale native installée sur votre ordinateur Windows, sans connexion Internet ni clé d'API.
+4. Ajustez la vitesse de diction (`0.7x` à `1.5x`).
+5. Cliquez sur **Écouter l'extrait** pour prévisualiser, puis sur **Générer la Voix Off** pour insérer le commentaire directement sur la timeline.
 
 ---
 
@@ -232,15 +336,139 @@ Vous avez oublié de masquer une information sensible pendant l'enregistrement ?
 
 ---
 
-## 🛡️ 14. Confidentialité & Données Locales
+---
 
-- **Zéro Télémétrie, Zéro Tracking** : Vos captures d'écran, vidéos, flux audio et webcam ne quittent **jamais** votre ordinateur.
-- **Stockage Local** : Toutes les vidéos sont stockées localement dans la base de données interne de votre navigateur/PC (`IndexedDB`).
+## 📜 14. Le Téléprompteur Flottant & Outil de Script
+
+Le **Téléprompteur** d'OpenPeek vous permet de délivrer vos présentations, tutoriels et cours en ligne avec une fluidité absolue, sans trous de mémoire et en maintenant votre regard droit vers la webcam.
+
+### A. Accès au Téléprompteur
+- Cliquez sur le bouton **📜 Téléprompteur** situé dans l'en-tête principal ou dans le menu latéral gauche.
+
+### B. Gestionnaire de Scripts & Calculateur de Débit
+- **Création de scripts multiples** : Rédigez ou collez vos textes, organisez vos prises de parole par sujet.
+- **Stockage 100% local** : Tous vos scripts sont enregistrés sur votre machine dans IndexedDB.
+- **Estimation dynamique du temps de parole** :
+  - OpenPeek compte en temps réel les mots de votre texte.
+  - Réglez votre cadence cible (ex: 140 mots/minute).
+  - L'application calcule immédiatement la durée exacte de votre intervention (ex: *3m 45s*).
+
+### C. Mode Lecteur Flottant Déplaçable
+- Cliquez sur **Lancer le Prompteur** :
+  - Une fenêtre semi-transparente épurée s'ouvre.
+  - **Déplacement à la souris** : Glissez la barre supérieure pour positionner le prompteur directement sous l'objectif de votre webcam (pour que vos yeux ne quittent jamais vos spectateurs).
+  - **Curseur de transparence (25% à 95%)** : Ajustez l'opacité pour lire votre prompteur tout en voyant vos fenêtres et logiciels au travers.
+  - **Ligne de repère visuel (Eye-line)** : Une barre horizontale discrète guide votre regard sur la ligne en cours de prononciation.
+  - **Défilement automatique fluide** : Vitesse calée sur votre débit WPM.
+  - **Contrôles pratiques** :
+    - Barre d'espace : Pause / Reprise instantanée.
+    - Touche Début / Raccourci : Recommencer au début en 1 clic.
+    - Curseur de taille de police : De 18px à 64px pour un confort de lecture optimal à distance.
+    - **Mode Miroir** : Inverse horizontalement le texte si vous utilisez un prompteur physique à miroir sans tain.
+
+---
+
+## 📖 15. Le Générateur de Guide Pas-à-Pas (Markdown, HTML & PDF)
+
+Transformez n'importe quelle capture vidéo en un tutoriel documenté, illustré et pédagogique en quelques clics :
+
+### A. Ouvrir le Générateur
+- **Depuis la Bibliothèque Locale** : Cliquez sur le bouton **Guide** sur la fiche de n'importe quelle vidéo.
+- **Depuis le Studio de Montage** : Cliquez sur **Guide Tuto** dans les actions d'export ou la barre supérieure.
+
+### B. Composition des Étapes
+1. **Naviguez dans la vidéo** à l'aide de la timeline ou des boutons de saut rapide (`-5s`, `-1s`, `+1s`, `+5s`).
+2. Cliquez sur **📸 Capturer cette étape (00:XX)** :
+   - OpenPeek extrait instantanément une capture d'écran haute résolution du moment exact de la vidéo.
+   - Une nouvelle carte d'étape s'ajoute à votre guide.
+3. **Renseignez les détails pédagogiques** :
+   - **Titre de l'action** (ex: *Cliquer sur le menu Fichier > Exporter*).
+   - **Instructions détaillées** (supporte le texte multi-lignes et les explications pas-à-pas).
+   - **Astuce / Conseil pro facultatif** (`💡 Astuce`) : Pour signaler un raccourci clavier ou un piège à éviter.
+4. Réorganisez les étapes grâce aux flèches monter/descendre ou remplacez une capture sans perdre votre texte grâce au bouton de rafraîchissement.
+
+### C. Aperçu & Triple Export 100% Hors-Ligne
+Basculez sur l'onglet **Aperçu du Guide** pour admirer la mise en page finale, puis choisissez votre format d'export :
+- **📋 Copier / Télécharger en Markdown (`.md`)** : Document complet GitHub Flavored Markdown intégrant le sommaire interactif, les étapes numérotées et les images en Base64.
+- **🌐 Télécharger en HTML Autonome (`.html`)** : Fichier web unique tout-en-un avec design moderne sombre/clair responsive et images intégrées. Peut être envoyé par email, hébergé ou partagé sans aucun fichier supplémentaire.
+- **🖨️ Imprimer en PDF (`.pdf`)** : Ouvre le dialogue d'impression système calibré pour le format A4 avec gestion des sauts de page automatiques pour générer un PDF propre et soigné.
+
+---
+
+## 🔖 16. Les Chapitres YouTube dans le Studio
+
+Structurez vos vidéos longues et optimisez le référencement (SEO) de vos vidéos sur YouTube grâce aux chapitres automatiques :
+
+### A. Génération en 1 Clic
+Dans le **Studio de Montage**, ouvrez la boîte de dialogue **🔖 Chapitres** :
+- **Générer depuis les clips** : Crée automatiquement un découpage calé sur chaque coupure de votre montage.
+- **Générer depuis les titres** : Convertit l'ensemble de vos cartons de titre et bandeaux d'intro/outro en chapitres minutés.
+
+### B. Piste 6 sur la Timeline Multi-Pistes
+- Vos chapitres apparaissent directement sur la piste **🔖 Chapitres** sous forme de badges horodatés.
+- Cliquez sur n'importe quel chapitre sur la timeline pour vous y téléporter immédiatement.
+
+### C. Respect des Normes YouTube & Export
+- OpenPeek veille à ce que votre premier chapitre commence bien à `00:00`, que vous disposiez d'au moins 3 chapitres et vous alerte si un chapitre dure moins de 10 secondes.
+- **Bouton Copier pour YouTube** : Copie la liste prête à être collée dans la description de votre vidéo YouTube.
+- **Bouton Télécharger (.txt)** : Exporte le fichier texte des chapitres.
+
+---
+
+## 🖼️ 17. Incrustation d'Images, Logos & Filigranes
+
+Apposez l'identité de votre marque, chaîne YouTube ou entreprise directement sur vos montages vidéo :
+
+### A. Chutier d'Images Dédié
+- Dans le Studio de Montage, basculez sur l'onglet **Images** du Chutier.
+- Cliquez sur **+ Importer un Logo / Image** pour charger vos fichiers PNG (avec transparence alpha), SVG, WebP ou JPG.
+
+### B. Piste 5 de la Timeline & Réglages Visuels
+- Ajoutez l'image sur la **Piste 5 (Images & Logos)** de la timeline.
+- **Options de personnalisation** :
+  - **Filigrane permanent** : Cochez l'option pour que le logo s'affiche sur toute la durée de la vidéo.
+  - **Présélections de position** : *Haut Droite*, *Haut Gauche*, *Centre*, *Bas Droite*, *Bas Gauche* ou placement libre X/Y.
+  - **Échelle & Opacité** : Ajustez la taille (de 5% à 50%) et la transparence (de 10% à 100%).
+  - **Ombre portée & Coins arrondis** : Pour une parfaite lisibilité sur tous les fonds d'écran clairs ou sombres.
+
+---
+
+## 🎭 18. Floutage d'Arrière-Plan & Fonds Virtuels Webcam (Bokeh / Chroma Key)
+
+Grâce au modèle d'intelligence artificielle léger embarqué **Google MediaPipe Selfie Segmentation**, OpenPeek détoure et sublime votre facecam en temps réel, 100% en local sur votre PC :
+
+### A. Modes de Floutage
+- **Flou Léger (10px)** : Crée une profondeur de champ subtile mettant en valeur votre visage tout en conservant le contexte de votre pièce.
+- **Flou Prononcé (25px)** : Effet bokeh studio masquant entièrement le désordre ou les éléments privés de votre arrière-plan.
+
+### B. Détourage & Fonds Virtuels
+- **Détourage Transparent** : Isole votre silhouette sans écran vert physique. Idéal pour incruster votre visage directement au-dessus de vos applications sans masquer l'écran.
+- **Fond Vert Chroma Key (`#00ff00`)** : Pour les utilisateurs souhaitant retravailler leur incrustation dans OBS Studio ou DaVinci Resolve.
+- **Galerie de Dégradés Studio** : *Studio Sombre*, *Cyber Neon*, *Slate Moderne*, *Sunset Chaleureux*, *Émeraude Feutré*.
+- **Image Personnalisée** : Sélectionnez n'importe quelle photo de votre ordinateur pour l'utiliser comme décor virtuel.
+
+---
+
+## 📁 19. Organisation de la Bibliothèque Locale (Projets & Filtres Médias)
+
+La **Bibliothèque locale** d'OpenPeek a été repensée pour vous offrir un espace de travail ordonné :
+
+- **Dossiers de Projets Personnalisés** : Créez des projets thématiques (ex: *Formation Rust*, *Démos Clients*, *Shorts TikTok*) avec pastilles de couleurs personnalisées pour regrouper vos captures.
+- **Filtres par Type de Média** : Affichez d'un clic uniquement vos *Vidéos*, vos *Images & Logos*, ou vos *Enregistrements Audio*.
+- **Recherche Instantanée & Tri** : Retrouvez n'importe quel fichier par mot-clé, date ou taille.
+- **Importation par Glisser-Déposer** : Glissez simplement vos fichiers depuis l'Explorateur Windows directement dans l'interface d'OpenPeek pour les intégrer à votre bibliothèque.
+
+---
+
+## 🛡️ 20. Confidentialité & Données Locales
+
+- **Zéro Télémétrie, Zéro Tracking** : Vos captures d'écran, vidéos, flux audio, webcam et scripts ne quittent **jamais** votre ordinateur.
+- **Stockage Local** : Toutes les vidéos, projets et scripts sont stockés localement dans la base de données interne de votre navigateur/PC (`IndexedDB`).
 - **Clés d'API Whisper/Groq** : Elles restent stockées uniquement dans le `localStorage` de votre machine et ne sont transmises qu'aux API officielles que vous avez configurées.
 
 ---
 
-## 🖥️ 15. Spécifications & Prérequis Matériels (GPU, CPU, RAM)
+## 🖥️ 21. Spécifications & Prérequis Matériels (GPU, CPU, RAM)
 
 Pour connaître en détail les exigences matérielles, le rôle de la carte graphique et les performances attendues selon vos résolutions cibles (1080p 30/60 fps, 4K, multi-écrans) :
 

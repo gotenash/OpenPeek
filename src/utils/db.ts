@@ -35,11 +35,21 @@ export interface SavedProject {
   totalDuration: number;
 }
 
+export interface TeleprompterScript {
+  id: string;
+  title: string;
+  content: string;
+  date: string;
+  wpm?: number; // target words per minute (e.g. 130)
+  fontSize?: number; // text font size in px (e.g. 24)
+}
+
 const DB_NAME = 'capt-screen-db';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE_NAME = 'recordings';
 const PROJECTS_STORE_NAME = 'projects';
 const MEDIA_PROJECTS_STORE_NAME = 'media_projects';
+const SCRIPTS_STORE_NAME = 'teleprompter_scripts';
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -58,6 +68,9 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(MEDIA_PROJECTS_STORE_NAME)) {
         db.createObjectStore(MEDIA_PROJECTS_STORE_NAME, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(SCRIPTS_STORE_NAME)) {
+        db.createObjectStore(SCRIPTS_STORE_NAME, { keyPath: 'id' });
       }
     };
   });
@@ -309,3 +322,52 @@ export async function deleteProject(id: string): Promise<void> {
     request.onsuccess = () => resolve();
   });
 }
+
+/**
+ * Teleprompter Scripts CRUD
+ */
+export async function getAllTeleprompterScripts(): Promise<TeleprompterScript[]> {
+  try {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(SCRIPTS_STORE_NAME, 'readonly');
+      const store = transaction.objectStore(SCRIPTS_STORE_NAME);
+      const request = store.getAll();
+
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const results = (request.result as TeleprompterScript[]) || [];
+        results.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        resolve(results);
+      };
+    });
+  } catch (error) {
+    console.error('Error fetching teleprompter scripts:', error);
+    return [];
+  }
+}
+
+export async function saveTeleprompterScript(script: TeleprompterScript): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(SCRIPTS_STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(SCRIPTS_STORE_NAME);
+    const request = store.put(script);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve();
+  });
+}
+
+export async function deleteTeleprompterScript(id: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(SCRIPTS_STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(SCRIPTS_STORE_NAME);
+    const request = store.delete(id);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve();
+  });
+}
+

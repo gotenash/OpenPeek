@@ -35,13 +35,15 @@ import {
   Search, 
   Volume2, 
   Maximize2,
-  FolderOpen
+  FolderOpen,
+  BookOpen
 } from 'lucide-react';
 import { VideoTrimmerModal } from './VideoTrimmerModal';
 import { GifExportModal } from './GifExportModal';
 import { DeviceFrameModal } from './DeviceFrameModal';
 import { AutoRedactModal } from './AutoRedactModal';
 import { SubtitlesStudioModal } from './SubtitlesStudioModal';
+import { TutorialMakerModal } from './TutorialMakerModal';
 
 interface VideoLibraryProps {
   refreshTrigger: number;
@@ -82,6 +84,7 @@ export function VideoLibrary({ refreshTrigger }: VideoLibraryProps) {
   const [frameModalVideo, setFrameModalVideo] = useState<SavedMedia | null>(null);
   const [redactModalVideo, setRedactModalVideo] = useState<SavedMedia | null>(null);
   const [subtitlesModalVideo, setSubtitlesModalVideo] = useState<SavedMedia | null>(null);
+  const [tutorialModalMedia, setTutorialModalMedia] = useState<SavedMedia | null>(null);
   
   // Project management modal
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
@@ -732,6 +735,15 @@ export function VideoLibrary({ refreshTrigger }: VideoLibraryProps) {
                         <Sparkles size={13} />
                         <span>GIF</span>
                       </button>
+
+                      <button 
+                        className="video-card-tool-btn guide" 
+                        onClick={() => setTutorialModalMedia(media)} 
+                        title="Créer un Guide Pas-à-Pas (Markdown, HTML, PDF)"
+                      >
+                        <BookOpen size={13} />
+                        <span>Guide</span>
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1157,6 +1169,13 @@ export function VideoLibrary({ refreshTrigger }: VideoLibraryProps) {
           onSavedToLibrary={() => {
             loadData();
           }}
+        />
+      )}
+
+      {tutorialModalMedia && (
+        <TutorialMakerModal
+          media={tutorialModalMedia}
+          onClose={() => setTutorialModalMedia(null)}
         />
       )}
     </div>

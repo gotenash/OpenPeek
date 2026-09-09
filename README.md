@@ -22,7 +22,7 @@
 
 ## ✨ Overview
 
-**OpenPeek** is an open-source, ultra-lightweight, GPU-accelerated screen recording suite and video editing studio for Windows. Built on Rust (Tauri v2) and React 19/TypeScript, it features a **Cinematic Studio Cursor**, **Live Keystroke HUD Visualizer**, **Automated Silence Remover**, **Fast-Forward Speed-Up Tool**, **Dynamic AI Subtitles Studio**, **AI Voiceover Generator (TTS)**, **Webcam Background Blur & Segmentation (Bokeh)**, **FFmpeg-Powered MP4 Exporter**, **Multi-Track Video Compositor**, **Device Mockup Framing**, **Live Annotation Palette**, and **Privacy Auto-Redaction System** — all running fast, with zero bloatware and 100% local privacy.
+**OpenPeek** is an open-source, ultra-lightweight, GPU-accelerated screen recording suite and video editing studio for Windows. Built on Rust (Tauri v2) and React 19/TypeScript, it features a **Cinematic Studio Cursor**, **Live Keystroke HUD Visualizer**, **Automated Silence Remover**, **Fast-Forward Speed-Up Tool**, **Dynamic AI Subtitles Studio**, **Live Microphone Voiceover Recording**, **ElevenLabs & OpenAI Voiceover Generator (TTS)**, **Floating Teleprompter with Script Manager**, **Step-by-Step Tutorial Generator (Markdown/HTML/PDF)**, **YouTube Chapters Automation**, **Image & Logo Overlay (Watermarks)**, **Webcam Background Blur & Virtual Backdrops (Bokeh/Chroma Key)**, **FFmpeg-Powered MP4 Exporter**, **Multi-Track Video Compositor**, **Device Mockup Framing**, **Live Annotation Palette**, and **Privacy Auto-Redaction System** — all running fast, with zero bloatware and 100% local privacy.
 
 ---
 
@@ -111,15 +111,52 @@
 - Convert screen captures or subtitled clips directly into high-framerate lightweight animated GIFs.
 - Customizable FPS (10, 15, 20, 24 fps), resolution downscaling, speed multiplier (1x, 1.25x, 1.5x, 2x), and loop count.
 
-### 🎬 13. Multi-Track Video Studio, Native FFmpeg MP4 Export & Audio Bin
-- **Video Track**: Re-order, arrange, speed up, and trim multiple clips from your library.
+### 🎬 13. Multi-Track Video Studio, Visual Filmstrip Timeline & Audio Bin
+- **🎞️ Visual Filmstrip Timeline**:
+  - Switch between **Filmstrip Thumbnail View** (like Premiere Pro / DaVinci Resolve) and **Compact Card View**.
+  - Background extraction of sequential high-resolution video frames taking trim offsets and speed multipliers into account.
+  - Active playhead tracking with a glowing purple outline following playback in real-time.
+  - Quick visual element placement on hover: click **`+🔤 Title`**, **`+🖼️ Logo`**, **`+🔍 Zoom`**, or **`+🔖 Chapter`** directly on any thumbnail to insert elements at that exact second.
+  - Click-to-seek navigation across all tracks (clicking any thumbnail, title, zoom, or image chip instantly seeks the player).
+- **🖥️ Resizable Monitor & Cinema Fullscreen Mode**:
+  - **1-Click Size Presets**: Switch instantly between **`260px` (Compact)**, **`380px` (Standard Recommandé)** (+70% larger canvas), and **`520px` (Grand Cinéma)**. Both the master monitor and the media bin scale smoothly together, with preference saved locally.
+  - **Cinema Fullscreen Suite**: Toggle true immersive fullscreen via the **`⛶ Plein écran`** button, double-clicking the canvas, or pressing **`F`**. Includes a floating glass HUD with timeline scrubbing, spacebar play/pause, frame-stepping (`-1s` / `+1s` with arrow keys), active layer badges, and `Esc` to exit.
+- **Multi-Track Arrangement**: Synchronized tracks with standardized 160px headers (Video Filmstrip, Live Microphone Voiceover, Titles, Background Music & Ducking, Dynamic Zooms, Image & Logo Watermarks, YouTube Chapters).
+- **🔴 Live Microphone Voiceover Recording**: Record audio commentary directly from your microphone while the video plays on the preview monitor. Includes blinking recording badge (`🔴 RECORDING VOICEOVER • 00:04`), interactive timeline blocks, duration trimming, volume control (0% to 200%), and automatic audio ducking lowering music volume during speech.
 - **Native MP4 Pipeline via FFmpeg**: Ultra-fast H.264 / AAC encoding with `+faststart` for universal compatibility (Windows Media Player, QuickTime, iOS, Android, YouTube).
 - **Interactive Export Progress**: Real-time progress bar with percentage indicator and stage status (Rendering → Converting → Ready).
 - **Transitions**: Smooth *Crossfade*, *Fade to Black*, *Slide*, and *Cut*.
 - **Title & Text Track**: Customizable Intro cards, Lower-Third banners, and Outro titles with glassmorphism styles.
-- **🎙️ AI Voiceover Generator (TTS)**: Generate high-definition studio commentary from text scripts using OpenAI TTS (`nova`, `alloy`, `echo`, `shimmer`, `onyx`, `fable`) or offline Windows voices.
+- **🎙️ AI Voiceover Generator (TTS)**: Generate studio commentary from text scripts using **ElevenLabs** (featuring a **100% free plan with 10,000 characters/month** and ultra-realistic `eleven_multilingual_v2` voices), **OpenAI TTS** (`nova`, `alloy`, `echo`, `shimmer`, `onyx`, `fable`), or offline Windows voices.
 - **🎵 Background Music & Audio Bin**: Import your own MP3/WAV/M4A files or choose from built-in royalty-free ambient presets (*Lo-Fi Chill*, *Modern Tech*, *Ambient Focus*, *Acoustic Calm*) with dedicated volume slider and audio ducking.
 - **Project Persistence**: Save and reload your `.captproj` editing project files to resume work at any time.
+
+### 🔖 14. YouTube Chapters Generator & Timeline Track
+- **1-Click Generation**: Automatically detects video clip cuts or title cards on the timeline and creates YouTube-compliant chapters (`00:00 - Title`).
+- **Interactive Track 6**: Dedicated timeline chapter bar with jump-to-time chips.
+- **YouTube Compliance**: Enforces starting at `00:00`, minimum 3 chapters, and flags any segments shorter than 10 seconds.
+- **Instant Export**: 1-click clipboard copy formatted for YouTube video descriptions and `.txt` file download.
+
+### 📜 15. Floating Teleprompter & Script Manager
+- **100% Local Script Storage**: Write and save unlimited scripts locally in IndexedDB with real-time word counting and speaking time estimates based on target WPM (words per minute).
+- **Floating Draggable Player**: Move the translucent prompter window directly beneath your webcam to maintain eye contact with your audience.
+- **Adjustable Opacity (25% - 95%)**: Keep full visibility of your desktop applications while reading.
+- **Eye-Line Focus & Smooth Auto-Scroll**: Precise pixel-smooth scrolling with spacebar play/pause controls.
+- **Mirror Mode (Horizontal Flip)**: Perfect for professional prompters equipped with reflective beam-splitter glass.
+
+### 📖 16. Step-by-Step Tutorial Generator (Markdown, HTML, PDF)
+- **High-Res Video Frame Extraction**: Navigate with precision controls (`-5s`, `-1s`, `+1s`, `+5s`) and click **📸 Capture Step** to grab pristine screenshots.
+- **Rich Step Editor**: Add action titles, multi-line instructions, and styled pro tip callouts (`💡 Tip`).
+- **Live Publication Preview**: Toggle between editor and finished guide view with numbered badges and step cards.
+- **Triple Export Formats**:
+  - **Markdown (`.md`)**: GitHub Flavored Markdown with embedded Base64 screenshots and table of contents.
+  - **Standalone HTML (`.html`)**: Self-contained responsive single-file webpage with dark/light styling and zero external asset dependencies.
+  - **Print / PDF A4 (`.pdf`)**: Native `@media print` layout with clean page breaks ready for PDF generation.
+
+### 🖼️ 17. Image & Logo Overlay Studio (Watermarks)
+- **Dedicated Images Bin**: Import PNG, SVG, WebP, and JPG logos into your project.
+- **Timeline Track 5**: Place logos permanently as watermarks or schedule timed on-screen appearances.
+- **Visual Studio Modal**: Live 16:9 canvas preview, 5 quick position presets (*Top-Right*, *Top-Left*, *Center*, etc.) or free X/Y coordinates, scale slider (5% to 50%), opacity (10% to 100%), drop shadow, and rounded corners.
 
 ---
 
@@ -195,7 +232,7 @@ npm run tauri build
 
 ## ✨ Présentation
 
-**OpenPeek** est une suite logicielle open-source d'enregistrement d'écran et de montage vidéo ultra-légère, accélérée par GPU et respectueuse de votre vie privée. Conçue avec Rust (Tauri v2) et React 19/TypeScript, elle intègre un **Curseur Studio Lissé**, un **Visualiseur de Raccourcis Clavier HUD**, un **Suppresseur Automatique de Silences**, un outil d'**Avance Rapide sur Temps de Chargement**, un **Studio de Sous-titres IA Dynamiques**, un **Générateur de Voix Off**, le **Floutage d'Arrière-Plan & Détourage Webcam (Bokeh)**, l'**Export MP4 Haute Fidélité via FFmpeg**, un **Studio Multi-Pistes**, l'**Habillage Device Mockup (MacBook, iPhone, iPad)**, une **Palette d'Annotation** et des **Masques d'Anonymisation**.
+**OpenPeek** est une suite logicielle open-source d'enregistrement d'écran et de montage vidéo ultra-légère, accélérée par GPU et respectueuse de votre vie privée. Conçue avec Rust (Tauri v2) et React 19/TypeScript, elle intègre un **Curseur Studio Lissé**, un **Visualiseur de Raccourcis Clavier HUD**, un **Suppresseur Automatique de Silences**, un outil d'**Avance Rapide sur Temps de Chargement**, un **Studio de Sous-titres IA Dynamiques**, l'**Enregistrement de Voix Off au Micro en Direct**, un **Générateur de Voix Off IA (ElevenLabs & OpenAI)**, un **Téléprompteur Flottant avec Gestionnaire de Scripts**, un **Générateur de Guides Pas-à-Pas (Markdown/HTML/PDF)**, les **Chapitres YouTube Automatisés**, l'**Incrustation de Logos & Filigranes**, le **Floutage d'Arrière-Plan & Fonds Virtuels Webcam (Bokeh/Chroma Key)**, l'**Export MP4 Haute Fidélité via FFmpeg**, un **Studio Multi-Pistes**, l'**Habillage Device Mockup (MacBook, iPhone, iPad)**, une **Palette d'Annotation** et des **Masques d'Anonymisation**.
 
 ---
 
@@ -285,14 +322,42 @@ npm run tauri build
 - Choix de la cadence (10 à 24 FPS), échelle de résolution, multiplicateur de vitesse et bouclage.
 
 ### 🎬 13. Studio de Montage Multi-Pistes, Export MP4 Natif FFmpeg & Chutier Audio
-- **Piste Vidéo** : Assemblez plusieurs captures issues de votre bibliothèque, changez l'ordre, accélérez et rognez les clips.
+- **Piste Vidéo & Alignement Strict** : Timeline multi-pistes fluide avec en-têtes standardisés de 160px garantissant une verticalité parfaite de la tête de lecture.
+- **🔴 Enregistrement de Voix Off en Direct (Microphone)** : Enregistrez votre voix au micro directement pendant que la vidéo défile sur le moniteur de montage. Badge d'enregistrement en direct (`🔴 ENREGISTREMENT VOIX OFF • 00:04`), blocs interactifs, volume réglable (0 à 200%) et auto-ducking automatique (la musique de fond baisse dès que vous parlez).
 - **Pipeline MP4 Natif via FFmpeg** : Encodage ultra-rapide H.264 / AAC avec `+faststart` pour une compatibilité universelle (Windows Media Player, QuickTime, iOS, Android, YouTube).
 - **Barre de Progression en Temps Réel** : Suivi visuel du rendu et de la conversion avec affichage dynamique du pourcentage et de l'état.
 - **Transitions** : *Fondu enchaîné*, *Fondu au noir*, *Balayage*, *Coupure*.
 - **Piste Titres & Textes** : Cartons d'intro, bandeaux inférieurs (*lower-thirds*) et cartons de fin personnalisables.
-- **🎙️ Générateur de Voix Off IA (Text-to-Speech)** : Créez des commentaires de qualité studio à partir de scripts textuels avec OpenAI TTS (`nova`, `alloy`, `echo`, `shimmer`, `onyx`, `fable`) ou les voix locales Windows gratuites.
-- **🎵 Musique de Fond & Chutier Audio** : Importez vos fichiers audio (**MP3, WAV, M4A**) ou choisissez parmi les ambiances libres de droits intégrées (*Lo-Fi Chill*, *Modern Tech*, *Ambient Focus*, *Acoustic Calm*) avec curseur de volume fin.
+- **🎙️ Générateur de Voix Off IA (Text-to-Speech)** : Créez des commentaires de qualité studio à partir de scripts textuels avec **ElevenLabs** (**forfait 100% gratuit de 10 000 caractères par mois** avec les voix ultra-réalistes `eleven_multilingual_v2`), **OpenAI TTS** (`nova`, `alloy`, `echo`, `shimmer`, `onyx`, `fable`) ou les voix locales Windows gratuites.
+- **🎵 Musique de Fond & Chutier Audio** : Importez vos fichiers audio (**MP3, WAV, M4A**) ou choisissez parmi les ambiances libres de droits intégrées (*Lo-Fi Chill*, *Modern Tech*, *Ambient Focus*, *Acoustic Calm*) avec curseur de volume fin et auto-ducking.
 - **Sauvegarde de Projets** : Enregistrez et rechargez vos montages (`.captproj` / base locale) pour y revenir plus tard.
+
+### 🔖 14. Générateur de Chapitres YouTube & Piste Timeline
+- **Génération en 1 Clic** : Détecte automatiquement les coupures de clips vidéo ou les cartons de titre pour créer des chapitres YouTube au format standard (`00:00 - Titre`).
+- **Piste Interactive 6 sur la Timeline** : Visualisez vos chapitres et sautez instantanément à n'importe quel moment de la vidéo en cliquant sur son badge.
+- **Règles YouTube Garanties** : Début obligatoire à `00:00`, minimum de 3 chapitres et avertissement dynamique si un chapitre dure moins de 10 secondes.
+- **Export Immédiat** : Copie dans le presse-papiers prête à coller dans la description YouTube et téléchargement du fichier `.txt`.
+
+### 📜 15. Téléprompteur Flottant & Gestionnaire de Scripts
+- **Gestionnaire de Scripts 100% Local** : Rédigez et stockez vos scripts dans IndexedDB avec calcul en temps réel du nombre de mots et estimation précise du temps de parole selon votre débit (WPM).
+- **Lecteur Flottant Déplaçable** : Placez la fenêtre translucide juste sous votre webcam pour maintenir un contact visuel naturel avec votre audience.
+- **Transparence Réglable (25% à 95%)** : Continuez de voir votre écran et vos fenêtres en arrière-plan pendant la lecture.
+- **Ligne de Repère Visuel & Défilement Fluide** : Défilement automatique régulier au pixel près avec contrôle Pause/Reprise par la barre d'espace.
+- **Mode Miroir** : Retournement horizontal compatible avec les vitres de prompteurs physiques équipées d'un verre semi-réfléchissant.
+
+### 📖 16. Générateur de Guide Pas-à-Pas (Markdown, HTML, PDF)
+- **Extraction d'Images Haute Résolution** : Naviguez dans la vidéo avec précision (`-5s`, `-1s`, `+1s`, `+5s`) et capturez les écrans clés d'un clic sur **📸 Capturer cette étape**.
+- **Formulaire d'Étape Pédagogique** : Titre de l'action, explications détaillées multi-lignes et boîtes d'astuces pro (`💡 Astuce`).
+- **Aperçu Avant Publication** : Basculez entre l'onglet d'édition et l'aperçu du guide avec cartes illustrées et badges numérotés.
+- **Triple Export 100% Hors-Ligne** :
+  - **Markdown (`.md`)** : Format GitHub Flavored Markdown avec sommaire interactif et images Base64 intégrées.
+  - **HTML Autonome (`.html`)** : Fichier HTML unique responsive avec design sombre/clair moderne, prêt à être partagé ou hébergé sans aucune ressource externe.
+  - **Impression PDF A4 (`.pdf`)** : Prise en charge des règles CSS `@media print` avec sauts de page propres pour un rendu PDF impeccable.
+
+### 🖼️ 17. Incrustation de Logos & Images (Filigranes)
+- **Chutier d'Images Dédié** : Importez vos logos PNG, SVG, WebP et JPG directement dans votre projet.
+- **Piste 5 sur la Timeline** : Intégrez votre logo en filigrane permanent ou sur des intervalles temporels choisis.
+- **Boîte de Réglages Studio** : Moniteur de prévisualisation 16:9 en direct, 5 présélections de position (*Haut Droite*, *Haut Gauche*, *Centre*, etc.) ou coordonnées libres X/Y, échelle (5% à 50%), opacité (10% à 100%), ombre portée et coins arrondis.
 
 ---
 

@@ -3,8 +3,67 @@ export interface AIVoicePreset {
   name: string;
   gender: 'female' | 'male';
   description: string;
-  provider: 'openai' | 'local';
+  provider: 'elevenlabs' | 'openai' | 'local';
 }
+
+export const ELEVENLABS_VOICE_PRESETS: AIVoicePreset[] = [
+  {
+    id: '21m00Tcm4TlvDq8ikWAM',
+    name: '🌟 Rachel (Femme - Calme & Naturelle)',
+    gender: 'female',
+    description: 'Idéale pour tutoriels, documentaires, explications claires.',
+    provider: 'elevenlabs'
+  },
+  {
+    id: 'pNInz6obpgDQGcFmaJgB',
+    name: '⚡ Adam (Homme - Profond & Narratif)',
+    gender: 'male',
+    description: 'Voix de narration captivante, idéale pour intros et vidéos pro.',
+    provider: 'elevenlabs'
+  },
+  {
+    id: 'ErXwobaYiN019PkySvjV',
+    name: '🎙️ Antoni (Homme - Clair & Posé)',
+    gender: 'male',
+    description: 'Ton équilibré et chaleureux, parfait pour guides et présentations.',
+    provider: 'elevenlabs'
+  },
+  {
+    id: 'EXAVITQu4vr4xnSDxMaL',
+    name: '✨ Bella (Femme - Douce & Expressive)',
+    gender: 'female',
+    description: 'Voix conviviale, storytelling, vlogs et démos produits.',
+    provider: 'elevenlabs'
+  },
+  {
+    id: 'VR6AewLTigWG4xSOukaG',
+    name: '💎 Arnold (Homme - Professionnel & Dynamique)',
+    gender: 'male',
+    description: 'Pitchs, annonces percutantes et formations dynamiques.',
+    provider: 'elevenlabs'
+  },
+  {
+    id: 'AZnzlk1XvdvUeBnXmlld',
+    name: '🔥 Domi (Femme - Énergique & Engagée)',
+    gender: 'female',
+    description: 'Rythme vif, Shorts, TikTok et résumés expressifs.',
+    provider: 'elevenlabs'
+  },
+  {
+    id: 'TxGEqnHWrfWFTfGW9XjX',
+    name: '🚀 Josh (Homme - Jeune & Spontané)',
+    gender: 'male',
+    description: 'Ton décontracté, tutos gaming, vulgarisation moderne.',
+    provider: 'elevenlabs'
+  },
+  {
+    id: 'ThT5KcBeYPX3keUQqHPh',
+    name: '📖 Dorothy (Femme - Agréable & Convaincante)',
+    gender: 'female',
+    description: 'Lecture posée, formation continue et guides pas-à-pas.',
+    provider: 'elevenlabs'
+  }
+];
 
 export const AI_VOICE_PRESETS: AIVoicePreset[] = [
   {
@@ -55,7 +114,7 @@ export interface TTSOptions {
   voiceId: string;
   speed?: number; // 0.5 to 2.0 (default 1.0)
   apiKey?: string;
-  provider?: 'openai' | 'local';
+  provider?: 'elevenlabs' | 'openai' | 'local';
   lang?: string;
 }
 
@@ -87,7 +146,49 @@ export function getLocalVoices(): Promise<SpeechSynthesisVoice[]> {
 }
 
 /**
- * Generates an audio Blob from text using either OpenAI TTS or local Web Speech Synthesis.
+ * Tests and verifies an ElevenLabs API key, returning subscription and character limits.
+ */
+export async function testElevenLabsApiKey(apiKey: string): Promise<{
+  valid: boolean;
+  tier?: string;
+  charactersUsed?: number;
+  characterLimit?: number;
+  message?: string;
+}> {
+  const cleanKey = apiKey.trim();
+  if (!cleanKey) {
+    return { valid: false, message: "La clé API ElevenLabs est vide." };
+  }
+
+  try {
+    const res = await fetch('https://api.elevenlabs.io/v1/user/subscription', {
+      headers: {
+        'xi-api-key': cleanKey
+      }
+    });
+
+    if (!res.ok) {
+      if (res.status === 401) {
+        return { valid: false, message: "Clé API ElevenLabs invalide ou expirée." };
+      }
+      return { valid: false, message: `Erreur ElevenLabs HTTP ${res.status}` };
+    }
+
+    const data = await res.json();
+    return {
+      valid: true,
+      tier: data.tier || 'Free',
+      charactersUsed: data.character_count ?? 0,
+      characterLimit: data.character_limit ?? 10000,
+      message: "Connexion réussie à l'API ElevenLabs !"
+    };
+  } catch (err: any) {
+    return { valid: false, message: err?.message || "Impossible de joindre les serveurs ElevenLabs." };
+  }
+}
+
+/**
+ * Generates an audio Blob from text using ElevenLabs, OpenAI TTS, or local Web Speech Synthesis.
  */
 export async function generateSpeechAudio(text: string, options: TTSOptions): Promise<Blob> {
   const cleanText = text.trim();
@@ -96,10 +197,49 @@ export async function generateSpeechAudio(text: string, options: TTSOptions): Pr
   }
 
   const speed = options.speed || 1.0;
-  const apiKey = options.apiKey || localStorage.getItem('openpeek_openai_key') || localStorage.getItem('openpeek_whisper_key') || '';
 
-  // 1. OpenAI TTS API (High Definition)
-  if (options.provider === 'openai' && apiKey) {
+  // 1. ElevenLabs TTS API (Ultra-Realistic Multilingual v2 with Free 10k chars/mo tier)
+  if (options.provider === 'elevenlabs') {
+    const elevenKey = options.apiKey || localStorage.getItem('openpeek_elevenlabs_key') || '';
+    if (!elevenKey.trim()) {
+      throw new Error("Clé API ElevenLabs manquante. Configurez votre clé gratuite (10 000 car./mois) sur elevenlabs.io.");
+    }
+
+    const voiceId = options.voiceId || '21m00Tcm4TlvDq8ikWAM';
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': elevenKey.trim(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        text: cleanText,
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+          style: 0.0,
+          use_speaker_boost: true
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errJson = await response.json().catch(() => ({}));
+      const detail = errJson?.detail?.message || errJson?.detail || `Erreur ElevenLabs HTTP ${response.status}`;
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    }
+
+    return await response.blob();
+  }
+
+  // 2. OpenAI TTS API (High Definition)
+  if (options.provider === 'openai') {
+    const apiKey = options.apiKey || localStorage.getItem('openpeek_openai_key') || localStorage.getItem('openpeek_whisper_key') || '';
+    if (!apiKey.trim()) {
+      throw new Error("Clé API OpenAI manquante.");
+    }
+
     const response = await fetch('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
       headers: {
@@ -123,7 +263,7 @@ export async function generateSpeechAudio(text: string, options: TTSOptions): Pr
     return await response.blob();
   }
 
-  // 2. Local Web Speech Synthesis recorded to Audio Buffer / WAV
+  // 3. Local Web Speech Synthesis recorded to Audio Buffer / WAV
   return synthesizeSpeechLocallyToBlob(cleanText, options.voiceId, speed, options.lang || 'fr-FR');
 }
 

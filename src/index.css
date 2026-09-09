@@ -772,7 +772,7 @@ body.overlay-mode #root {
 
 .video-card-tools-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
   gap: 4px;
 }
 
@@ -828,6 +828,60 @@ body.overlay-mode #root {
   color: #ec4899;
   border-color: rgba(236, 72, 153, 0.4);
   background: rgba(236, 72, 153, 0.1);
+}
+
+.video-card-tool-btn.guide:hover {
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.1);
+}
+
+/* Timeline Filmstrip & Thumbnail Hover Overlay */
+.filmstrip-thumb-card {
+  position: relative;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.filmstrip-thumb-card:hover {
+  transform: translateY(-2px);
+  z-index: 10;
+}
+
+.filmstrip-thumb-card .filmstrip-hover-bar {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 15, 25, 0.88);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease-in-out;
+}
+
+.filmstrip-thumb-card:hover .filmstrip-hover-bar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.filmstrip-hover-bar button {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+  border-radius: 4px;
+  padding: 3px 5px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.filmstrip-hover-bar button:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  transform: scale(1.1);
 }
 
 .action-btn {
@@ -1926,4 +1980,255 @@ body.overlay-mode #root {
 .spin {
   animation: spin 1s linear infinite;
 }
+
+/* Video Editor Master Monitor Fullscreen & Theater styles */
+.editor-monitor-panel {
+  transition: height 0.22s ease-in-out;
+}
+
+.editor-monitor-panel.is-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  z-index: 999999 !important;
+  background: radial-gradient(circle at center, #0b1120 0%, #030712 100%) !important;
+  padding: 16px 24px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+  box-sizing: border-box !important;
+  border-radius: 0 !important;
+  border: none !important;
+}
+
+.editor-monitor-panel.is-fullscreen .monitor-canvas-box {
+  border-radius: 12px !important;
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.95), 0 0 40px rgba(139, 92, 246, 0.2) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+/* ==========================================================================
+   Interactive Chronological Spatial Timeline Lanes (Drag & Stretch)
+   ========================================================================== */
+
+.timeline-spatial-lane {
+  position: relative;
+  height: 44px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  user-select: none;
+  touch-action: none;
+  overflow: visible;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.timeline-spatial-lane:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.timeline-lane-ruler-grid {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  pointer-events: none;
+  opacity: 0.15;
+}
+
+.timeline-lane-ruler-tick {
+  flex: 1;
+  border-right: 1px dashed rgba(255, 255, 255, 0.4);
+  height: 100%;
+}
+
+.timeline-playhead-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #a855f7;
+  box-shadow: 0 0 8px #a855f7, 0 0 16px rgba(168, 85, 247, 0.6);
+  pointer-events: none;
+  z-index: 15;
+  transform: translateX(-50%);
+}
+
+.timeline-spatial-block {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 11px;
+  cursor: grab;
+  box-sizing: border-box;
+  touch-action: none;
+  z-index: 5;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.timeline-spatial-block:hover {
+  z-index: 10;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.65), 0 0 10px rgba(255, 255, 255, 0.15);
+}
+
+.timeline-spatial-block:active,
+.timeline-spatial-block.is-dragging {
+  cursor: grabbing !important;
+  z-index: 20 !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.8), 0 0 16px currentColor !important;
+}
+
+.timeline-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 8;
+  opacity: 0.6;
+  transition: opacity 0.15s ease, background-color 0.15s ease, width 0.15s ease;
+}
+
+.timeline-resize-handle::after {
+  content: '';
+  width: 2px;
+  height: 14px;
+  background: currentColor;
+  border-radius: 1px;
+  opacity: 0.7;
+}
+
+.timeline-resize-handle:hover,
+.timeline-resize-handle.is-resizing {
+  opacity: 1 !important;
+  background: rgba(255, 255, 255, 0.25);
+  width: 10px;
+}
+
+.timeline-resize-handle-left {
+  left: 0;
+  border-top-left-radius: 5px;
+  border-bottom-left-radius: 5px;
+}
+
+.timeline-resize-handle-right {
+  right: 0;
+  border-top-right-radius: 5px;
+  border-bottom-right-radius: 5px;
+}
+
+.timeline-block-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.timeline-block-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeline-block-time {
+  font-size: 9px;
+  font-family: monospace;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.timeline-block-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  pointer-events: auto;
+  position: relative;
+  z-index: 25;
+}
+
+.timeline-mini-btn {
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 2px 5px;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s ease;
+  pointer-events: auto;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.timeline-mini-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: scale(1.08);
+}
+
+@keyframes recordPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.7);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(244, 63, 94, 0);
+    transform: scale(1.02);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0);
+    transform: scale(1);
+  }
+}
+
+.voiceover-recording-badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  background: rgba(225, 29, 72, 0.92);
+  backdrop-filter: blur(8px);
+  border: 1px solid #fb7185;
+  color: #ffffff;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 14px rgba(225, 29, 72, 0.5);
+  animation: recordPulse 1.6s infinite;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.voiceover-rec-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  box-shadow: 0 0 6px #ffffff;
+}
+
+
 

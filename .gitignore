@@ -44,6 +44,7 @@ logs/
 *.mp4
 *.gif
 *.captproj.tmp
+scratch/
 
 # OS Generated Files
 .DS_Store

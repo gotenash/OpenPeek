@@ -12,8 +12,10 @@ import {
 } from 'lucide-react';
 import { 
   AI_VOICE_PRESETS, 
+  ELEVENLABS_VOICE_PRESETS,
   getLocalVoices, 
-  generateSpeechAudio 
+  generateSpeechAudio,
+  testElevenLabsApiKey
 } from '../utils/ttsEngine';
 
 interface VoiceGeneratorModalProps {
@@ -24,15 +26,24 @@ interface VoiceGeneratorModalProps {
 
 export function VoiceGeneratorModal({ initialText = '', onClose, onGenerated }: VoiceGeneratorModalProps) {
   const [text, setText] = useState<string>(initialText);
-  const [voiceProvider, setVoiceProvider] = useState<'openai' | 'local'>('openai');
-  const [selectedVoiceId, setSelectedVoiceId] = useState<string>('nova');
+  const [voiceProvider, setVoiceProvider] = useState<'elevenlabs' | 'openai' | 'local'>(() => {
+    const hasEleven = !!localStorage.getItem('openpeek_elevenlabs_key');
+    const hasOpenai = !!localStorage.getItem('openpeek_openai_key');
+    if (hasEleven) return 'elevenlabs';
+    if (hasOpenai) return 'openai';
+    return 'elevenlabs';
+  });
+  const [elevenVoiceId, setElevenVoiceId] = useState<string>('21m00Tcm4TlvDq8ikWAM');
+  const [openaiVoiceId, setOpenaiVoiceId] = useState<string>('nova');
   const [localVoiceName, setLocalVoiceName] = useState<string>('');
   const [localVoices, setLocalVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [speed, setSpeed] = useState<number>(1.0);
   
-  // API Key for OpenAI
-  const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('openpeek_openai_key') || localStorage.getItem('openpeek_whisper_key') || '');
+  // API Keys
+  const [elevenLabsKey, setElevenLabsKey] = useState<string>(() => localStorage.getItem('openpeek_elevenlabs_key') || '');
+  const [openaiKey, setOpenaiKey] = useState<string>(() => localStorage.getItem('openpeek_openai_key') || localStorage.getItem('openpeek_whisper_key') || '');
   const [showApiKeyInput, setShowApiKeyInput] = useState<boolean>(false);
+  const [elevenQuota, setElevenQuota] = useState<{ used?: number; limit?: number } | null>(null);
 
   // Status & Audio Preview
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
@@ -54,8 +65,24 @@ export function VoiceGeneratorModal({ initialText = '', onClose, onGenerated }: 
     });
   }, []);
 
-  const handleSaveApiKey = (key: string) => {
-    setApiKey(key);
+  // Fetch ElevenLabs quota if key is present
+  useEffect(() => {
+    if (elevenLabsKey.trim()) {
+      testElevenLabsApiKey(elevenLabsKey.trim()).then((res) => {
+        if (res.valid && res.characterLimit !== undefined) {
+          setElevenQuota({ used: res.charactersUsed, limit: res.characterLimit });
+        }
+      });
+    }
+  }, [elevenLabsKey]);
+
+  const handleSaveElevenKey = (key: string) => {
+    setElevenLabsKey(key);
+    localStorage.setItem('openpeek_elevenlabs_key', key.trim());
+  };
+
+  const handleSaveOpenaiKey = (key: string) => {
+    setOpenaiKey(key);
     localStorage.setItem('openpeek_openai_key', key.trim());
     if (localStorage.getItem('openpeek_whisper_service') === 'openai') {
       localStorage.setItem('openpeek_whisper_key', key.trim());
@@ -109,10 +136,20 @@ export function VoiceGeneratorModal({ initialText = '', onClose, onGenerated }: 
     setErrorMsg(null);
 
     try {
+      const activeVoiceId = voiceProvider === 'elevenlabs'
+        ? elevenVoiceId
+        : voiceProvider === 'openai'
+        ? openaiVoiceId
+        : localVoiceName;
+
+      const activeApiKey = voiceProvider === 'elevenlabs'
+        ? elevenLabsKey
+        : openaiKey;
+
       const blob = await generateSpeechAudio(text, {
-        voiceId: voiceProvider === 'openai' ? selectedVoiceId : localVoiceName,
+        voiceId: activeVoiceId,
         speed,
-        apiKey,
+        apiKey: activeApiKey,
         provider: voiceProvider,
         lang: 'fr-FR'
       });
@@ -127,7 +164,7 @@ export function VoiceGeneratorModal({ initialText = '', onClose, onGenerated }: 
       }
     } catch (e: any) {
       setErrorMsg(e.message || "Erreur lors de la génération audio");
-      if (voiceProvider === 'openai' && !apiKey) {
+      if ((voiceProvider === 'elevenlabs' && !elevenLabsKey) || (voiceProvider === 'openai' && !openaiKey)) {
         setShowApiKeyInput(true);
       }
     } finally {
@@ -199,12 +236,33 @@ export function VoiceGeneratorModal({ initialText = '', onClose, onGenerated }: 
           />
         </div>
 
-        {/* Provider Toggle (OpenAI HD vs Local Gratuit) */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        {/* Provider Toggle (ElevenLabs vs OpenAI vs Local Windows) */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
+          <button
+            onClick={() => setVoiceProvider('elevenlabs')}
+            style={{
+              padding: '6px 8px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 600,
+              backgroundColor: voiceProvider === 'elevenlabs' ? 'rgba(192, 132, 252, 0.25)' : 'rgba(255,255,255,0.03)',
+              border: voiceProvider === 'elevenlabs' ? '1px solid #c084fc' : '1px solid var(--border-color)',
+              color: voiceProvider === 'elevenlabs' ? '#c084fc' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '5px'
+            }}
+          >
+            <Sparkles size={12} color="#c084fc" />
+            <span>✨ ElevenLabs (Gratuit)</span>
+          </button>
+
           <button
             onClick={() => setVoiceProvider('openai')}
             style={{
-              padding: '6px 10px',
+              padding: '6px 8px',
               borderRadius: '6px',
               fontSize: '11px',
               fontWeight: 600,
@@ -215,48 +273,119 @@ export function VoiceGeneratorModal({ initialText = '', onClose, onGenerated }: 
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '6px'
+              gap: '5px'
             }}
           >
-            <Sparkles size={13} />
-            <span>IA HD (OpenAI TTS)</span>
+            <Sparkles size={12} color="#38bdf8" />
+            <span>🤖 OpenAI TTS</span>
           </button>
 
           <button
             onClick={() => setVoiceProvider('local')}
             style={{
-              padding: '6px 10px',
+              padding: '6px 8px',
               borderRadius: '6px',
               fontSize: '11px',
               fontWeight: 600,
-              backgroundColor: voiceProvider === 'local' ? 'rgba(192, 132, 252, 0.2)' : 'rgba(255,255,255,0.03)',
-              border: voiceProvider === 'local' ? '1px solid #c084fc' : '1px solid var(--border-color)',
-              color: voiceProvider === 'local' ? '#c084fc' : 'var(--text-secondary)',
+              backgroundColor: voiceProvider === 'local' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.03)',
+              border: voiceProvider === 'local' ? '1px solid #10b981' : '1px solid var(--border-color)',
+              color: voiceProvider === 'local' ? '#34d399' : 'var(--text-secondary)',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '6px'
+              gap: '5px'
             }}
           >
-            <Zap size={13} />
-            <span>Gratuit (Voix Windows)</span>
+            <Zap size={12} color="#10b981" />
+            <span>💻 Windows Local</span>
           </button>
         </div>
 
-        {/* Voice Selector */}
-        {voiceProvider === 'openai' ? (
+        {/* ElevenLabs Voices Selector */}
+        {voiceProvider === 'elevenlabs' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-              Choix du Timbre de Voix IA :
-            </label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
-              {AI_VOICE_PRESETS.map((v) => {
-                const isSel = selectedVoiceId === v.id;
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                Voix Ultra-Réalistes ElevenLabs (Modèle Multilingue v2) :
+              </label>
+              {elevenQuota && elevenQuota.limit !== undefined && (
+                <span style={{ fontSize: '10px', color: '#c084fc', fontWeight: 600 }}>
+                  ✨ {Math.max(0, (elevenQuota.limit || 10000) - (elevenQuota.used || 0)).toLocaleString()} car. restants
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px', maxHeight: '180px', overflowY: 'auto' }}>
+              {ELEVENLABS_VOICE_PRESETS.map((v) => {
+                const isSel = elevenVoiceId === v.id;
                 return (
                   <button
                     key={v.id}
-                    onClick={() => setSelectedVoiceId(v.id)}
+                    onClick={() => setElevenVoiceId(v.id)}
+                    style={{
+                      padding: '6px 8px',
+                      borderRadius: '6px',
+                      textAlign: 'left',
+                      backgroundColor: isSel ? 'rgba(192, 132, 252, 0.2)' : 'rgba(255,255,255,0.03)',
+                      border: isSel ? '1px solid #c084fc' : '1px solid var(--border-color)',
+                      color: isSel ? '#c084fc' : 'var(--text-secondary)',
+                      fontSize: '11px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, color: isSel ? '#c084fc' : '#ffffff' }}>{v.name}</div>
+                    <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>{v.description}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* ElevenLabs API Key Drawer */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '2px' }}>
+              <button
+                onClick={() => setShowApiKeyInput(!showApiKeyInput)}
+                style={{ background: 'none', border: 'none', color: '#c084fc', fontSize: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                <Key size={11} />
+                <span>{elevenLabsKey ? '✓ Clé API ElevenLabs configurée' : '⚠️ Configurer Clé API ElevenLabs (Gratuit 10k car./mois)'}</span>
+              </button>
+            </div>
+
+            {showApiKeyInput && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', backgroundColor: 'rgba(15, 23, 42, 0.8)', padding: '6px 8px', borderRadius: '4px', border: '1px solid rgba(192, 132, 252, 0.3)' }}>
+                <input
+                  type="password"
+                  value={elevenLabsKey}
+                  onChange={(e) => handleSaveElevenKey(e.target.value)}
+                  placeholder="xi-api-key..."
+                  className="form-input"
+                  style={{ width: '100%', fontSize: '11px', padding: '3px 6px', boxSizing: 'border-box' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px', color: 'var(--text-muted)' }}>
+                  <span>Forfait 10 000 caractères offerts à vie chaque mois.</span>
+                  <a href="https://elevenlabs.io" target="_blank" rel="noreferrer" style={{ color: '#c084fc', textDecoration: 'underline' }}>
+                    Créer mon compte gratuit sur elevenlabs.io
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* OpenAI Voices Selector */}
+        {voiceProvider === 'openai' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              Choix du Timbre de Voix OpenAI (TTS-1) :
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
+              {AI_VOICE_PRESETS.map((v) => {
+                const isSel = openaiVoiceId === v.id;
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => setOpenaiVoiceId(v.id)}
                     style={{
                       padding: '6px 8px',
                       borderRadius: '6px',
@@ -275,14 +404,14 @@ export function VoiceGeneratorModal({ initialText = '', onClose, onGenerated }: 
               })}
             </div>
 
-            {/* API Key Drawer */}
+            {/* OpenAI API Key Drawer */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '2px' }}>
               <button
                 onClick={() => setShowApiKeyInput(!showApiKeyInput)}
                 style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
               >
                 <Key size={11} />
-                <span>{apiKey ? '✓ Clé API OpenAI configurée' : '⚠️ Configurer Clé API OpenAI (pour mode HD)'}</span>
+                <span>{openaiKey ? '✓ Clé API OpenAI configurée' : '⚠️ Configurer Clé API OpenAI (pour mode HD)'}</span>
               </button>
             </div>
 
@@ -290,8 +419,8 @@ export function VoiceGeneratorModal({ initialText = '', onClose, onGenerated }: 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', backgroundColor: 'rgba(15, 23, 42, 0.8)', padding: '6px 8px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
                 <input
                   type="password"
-                  value={apiKey}
-                  onChange={(e) => handleSaveApiKey(e.target.value)}
+                  value={openaiKey}
+                  onChange={(e) => handleSaveOpenaiKey(e.target.value)}
                   placeholder="sk-..."
                   className="form-input"
                   style={{ width: '100%', fontSize: '11px', padding: '3px 6px', boxSizing: 'border-box' }}
@@ -302,7 +431,10 @@ export function VoiceGeneratorModal({ initialText = '', onClose, onGenerated }: 
               </div>
             )}
           </div>
-        ) : (
+        )}
+
+        {/* Windows Local Voices Selector */}
+        {voiceProvider === 'local' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>
               Voix Windows Installée :
