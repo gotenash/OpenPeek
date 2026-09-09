@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { saveRecording, type SavedVideo } from '../utils/db';
-import { resolveAccurateBlobDuration } from '../utils/subtitlesEngine';
 import { webcamSegmenter, type WebcamBackgroundEffect, type WebcamVirtualBg } from '../utils/webcamSegmenter';
+import { repairWebmDuration } from '../utils/webmDurationPatcher';
 
 export interface RecorderOptions {
   resolution: '1080p' | '720p' | '4k';
@@ -160,6 +160,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
   const analyserRef = useRef<AnalyserNode | null>(null);
   const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const systemAudioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioNodesRef = useRef<AudioNode[]>([]);
 
   // Webcam position & size variables (relative coordinates 0-1)
   const webcamPosRef = useRef({ x: 0.85, y: 0.85 }); // bottom right
@@ -261,6 +262,13 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
       audioContextRef.current.close();
       audioContextRef.current = null;
+    }
+
+    if (audioNodesRef.current.length > 0) {
+      audioNodesRef.current.forEach(node => {
+        try { node.disconnect(); } catch (e) {}
+      });
+      audioNodesRef.current = [];
     }
 
     if (screenVideoRef.current) {
@@ -1019,18 +1027,28 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
 
       // 2. Initialize Web Audio API for mixing
       const opts = optionsRef.current;
+      audioNodesRef.current = [];
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       audioContextRef.current = audioContext;
       if (audioContext.state === 'suspended') {
         await audioContext.resume();
       }
+      // Auto-recover audioContext if suspended or interrupted during recording
+      audioContext.onstatechange = () => {
+        if (audioContext.state === 'suspended' || (audioContext.state as string) === 'interrupted') {
+          audioContext.resume().catch((e) => console.warn('Could not auto-resume audioContext:', e));
+        }
+      };
+
       const audioDestination = audioContext.createMediaStreamDestination();
       audioDestinationRef.current = audioDestination;
+      audioNodesRef.current.push(audioDestination);
 
       // Setup analyser node for visualizer
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 256;
       analyserRef.current = analyser;
+      audioNodesRef.current.push(analyser);
       // Do NOT connect to audioContext.destination to avoid sending microphone input to speakers (echo feedback loop)
 
       // 3. Connect system audio if present in screen stream
@@ -1041,6 +1059,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         sysSource.connect(audioDestination);
         sysSource.connect(analyser);
         systemAudioSourceRef.current = sysSource;
+        audioNodesRef.current.push(sysSource);
       }
 
       // 4. Connect microphone audio with DSP Filter Chain (Noise Suppression + Vocal Enhancer)
@@ -1074,8 +1093,16 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         }
         micStreamRef.current = micStream;
 
+        // Monitor USB mic track state
+        const micTrack = micStream.getAudioTracks()[0];
+        if (micTrack) {
+          micTrack.onmute = () => console.warn('Microphone audio track was muted by system or USB hardware');
+          micTrack.onunmute = () => console.log('Microphone audio track unmuted and active');
+        }
+
         const micSource = audioContext.createMediaStreamSource(micStream);
         micSourceRef.current = micSource;
+        audioNodesRef.current.push(micSource);
 
         let lastNode: AudioNode = micSource;
 
@@ -1087,6 +1114,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           highPass.Q.value = 0.7;
           lastNode.connect(highPass);
           lastNode = highPass;
+          audioNodesRef.current.push(highPass);
         }
 
         // DSP Filter 2: Studio Vocal Presence & Clarity Boost
@@ -1098,6 +1126,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           vocalPresence.gain.value = 3.5; // +3.5dB speech intelligibility
           lastNode.connect(vocalPresence);
           lastNode = vocalPresence;
+          audioNodesRef.current.push(vocalPresence);
 
           // DSP Filter 3: Studio Dynamics Compressor & Limiter (Leveler for broadcast clarity)
           const compressor = audioContext.createDynamicsCompressor();
@@ -1108,6 +1137,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           compressor.release.value = 0.15;
           lastNode.connect(compressor);
           lastNode = compressor;
+          audioNodesRef.current.push(compressor);
         }
 
         // DSP Filter 4: Output Gain Control
@@ -1115,6 +1145,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         gainNode.gain.value = opts.micGain !== undefined ? opts.micGain : 1.15;
         lastNode.connect(gainNode);
         lastNode = gainNode;
+        audioNodesRef.current.push(gainNode);
 
         lastNode.connect(audioDestination);
         lastNode.connect(analyser);
@@ -1123,6 +1154,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         const micAnalyser = audioContext.createAnalyser();
         micAnalyser.fftSize = 32;
         lastNode.connect(micAnalyser);
+        audioNodesRef.current.push(micAnalyser);
         const dataArray = new Uint8Array(micAnalyser.frequencyBinCount);
         
         const updateLevel = () => {
@@ -1514,6 +1546,8 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
   // Finalize video generation, create thumbnail, and save to IndexedDB
   const finalizeRecording = async (canvasElement: HTMLCanvasElement) => {
     const videoBlob = new Blob(chunksRef.current, { type: mediaRecorderRef.current?.mimeType || 'video/webm' });
+    chunksRef.current = []; // Free individual chunk buffers immediately
+
     let finalDuration = recordingTime;
     let totalElapsedMs = accumulatedTimeRef.current;
     if (recordingStartTimeRef.current > 0) {
@@ -1524,15 +1558,14 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       finalDuration = elapsedSec;
     }
 
+    // Fix WebM missing duration header instantly via chunked 64KB EBML patch (< 1ms, zero IPC, 0 memory overhead)
+    let finalBlob = videoBlob;
     try {
-      const probed = await resolveAccurateBlobDuration(videoBlob, finalDuration);
-      if (isFinite(probed) && probed > 0.5) {
-        finalDuration = Math.round(probed);
-      }
+      finalBlob = await repairWebmDuration(videoBlob, finalDuration);
     } catch (e) {
-      console.warn('Could not probe accurate blob duration on finalize:', e);
+      console.warn('Could not repair WebM duration header, fallback to raw blob:', e);
     }
-    const finalSize = videoBlob.size;
+    const finalSize = finalBlob.size;
     
     // Generate thumbnail from canvas
     let thumbnailBase64 = '';
@@ -1559,7 +1592,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     const newVideo: SavedVideo = {
       id: crypto.randomUUID(),
       title: `Enregistrement du ${formattedDate}`,
-      blob: videoBlob,
+      blob: finalBlob,
       duration: finalDuration,
       size: finalSize,
       date: dateStr,

@@ -411,7 +411,19 @@ fn is_ffmpeg_available() -> bool {
 }
 
 #[tauri::command]
-async fn convert_webm_to_mp4(webm_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+async fn convert_webm_to_mp4(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let webm_bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(b) => b.clone(),
+        tauri::ipc::InvokeBody::Json(val) => {
+            if let Some(arr) = val.as_array() {
+                arr.iter().filter_map(|v| v.as_u64().map(|n| n as u8)).collect()
+            } else if let Ok(bytes) = serde_json::from_value::<Vec<u8>>(val.clone()) {
+                bytes
+            } else {
+                return Err("Format de données invalide".to_string());
+            }
+        }
+    };
     let ffmpeg_cmd = find_ffmpeg_executable().ok_or_else(|| {
         "FFmpeg n'a pas été détecté sur votre ordinateur.".to_string()
     })?;
@@ -481,7 +493,77 @@ async fn convert_webm_to_mp4(webm_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
 
     let _ = std::fs::remove_file(&output_path);
 
-    Ok(mp4_bytes)
+    Ok(tauri::ipc::Response::new(mp4_bytes))
+}
+
+#[tauri::command]
+async fn remux_webm_metadata(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let webm_bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(b) => b.clone(),
+        tauri::ipc::InvokeBody::Json(val) => {
+            if let Some(arr) = val.as_array() {
+                arr.iter().filter_map(|v| v.as_u64().map(|n| n as u8)).collect()
+            } else if let Ok(bytes) = serde_json::from_value::<Vec<u8>>(val.clone()) {
+                bytes
+            } else {
+                return Err("Format de données invalide".to_string());
+            }
+        }
+    };
+    let ffmpeg_cmd = find_ffmpeg_executable().ok_or_else(|| {
+        "FFmpeg non disponible pour le remuxing".to_string()
+    })?;
+
+    let temp_dir = std::env::temp_dir();
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(54321);
+
+    let input_path = temp_dir.join(format!("openpeek_raw_{}.webm", unique_id));
+    let output_path = temp_dir.join(format!("openpeek_fixed_{}.webm", unique_id));
+
+    std::fs::write(&input_path, &webm_bytes)
+        .map_err(|e| format!("Impossible d'écrire le fichier temporaire: {}", e))?;
+
+    let mut cmd = std::process::Command::new(ffmpeg_cmd);
+    cmd.args(&[
+        "-y",
+        "-i",
+        input_path.to_str().unwrap(),
+        "-c",
+        "copy",
+        output_path.to_str().unwrap(),
+    ]);
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = cmd.output().map_err(|e| {
+        let _ = std::fs::remove_file(&input_path);
+        format!("Erreur lors du remuxing FFmpeg: {}", e)
+    })?;
+
+    let _ = std::fs::remove_file(&input_path);
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let _ = std::fs::remove_file(&output_path);
+        return Err(format!("Échec du remuxing FFmpeg: {}", stderr));
+    }
+
+    let fixed_bytes = std::fs::read(&output_path).map_err(|e| {
+        let _ = std::fs::remove_file(&output_path);
+        format!("Impossible de lire le fichier WebM réparé: {}", e)
+    })?;
+
+    let _ = std::fs::remove_file(&output_path);
+
+    Ok(tauri::ipc::Response::new(fixed_bytes))
 }
 
 fn main() {
@@ -545,7 +627,8 @@ fn main() {
             save_screen_preference,
             set_active_capture_monitor,
             is_ffmpeg_available,
-            convert_webm_to_mp4
+            convert_webm_to_mp4,
+            remux_webm_metadata
         ])
         .setup(|app| {
             if let Some(main_window) = app.get_webview_window("main") {

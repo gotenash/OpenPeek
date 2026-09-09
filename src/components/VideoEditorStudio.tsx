@@ -1302,10 +1302,12 @@ export function VideoEditorStudio() {
             setExportStatus('Encodage haute qualité FFmpeg...');
             setExportProgress(98);
             const arrayBuf = await finalBlob.arrayBuffer();
-            const mp4Bytes = await invoke<number[]>('convert_webm_to_mp4', {
-              webmBytes: Array.from(new Uint8Array(arrayBuf))
-            });
-            finalBlob = new Blob([new Uint8Array(mp4Bytes)], { type: 'video/mp4' });
+            const mp4Data = await invoke<ArrayBuffer | Uint8Array>('convert_webm_to_mp4', new Uint8Array(arrayBuf));
+            if (mp4Data instanceof ArrayBuffer) {
+              finalBlob = new Blob([mp4Data], { type: 'video/mp4' });
+            } else {
+              finalBlob = new Blob([mp4Data as any], { type: 'video/mp4' });
+            }
             outputExt = 'mp4';
           } else {
             console.warn("FFmpeg non détecté, exportation WebM.");
@@ -1530,7 +1532,7 @@ export function VideoEditorStudio() {
                     )}
                     <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                       <span style={{ fontSize: '11px', fontWeight: 500, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', maxWidth: '140px' }}>{v.title}</span>
-                      <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{formatTime(v.duration)}</span>
+                      <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{formatTime(v.duration || 0)}</span>
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '3px' }}>

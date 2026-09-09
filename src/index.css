@@ -855,6 +855,521 @@ body.overlay-mode #root {
   color: var(--secondary);
 }
 
+/* =========================================
+   Multi-Media Library & Project Management
+   ========================================= */
+
+.library-header-panel {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(16px);
+  border-radius: 12px;
+}
+
+/* Project Pills Navigation */
+.project-pill-wrapper {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+
+.project-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.project-pill:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.project-pill.active {
+  color: #ffffff;
+  background: rgba(139, 92, 246, 0.18);
+  border-color: var(--primary);
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.25);
+}
+
+.project-color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.project-pill-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-pill-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  color: inherit;
+}
+
+.project-pill-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: 3px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.project-pill-wrapper:hover .project-pill-actions {
+  opacity: 1;
+}
+
+.project-action-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.project-action-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
+}
+
+.project-action-btn.delete:hover {
+  background: rgba(244, 63, 94, 0.2);
+  color: #f43f5e;
+  border-color: rgba(244, 63, 94, 0.4);
+}
+
+.btn-add-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--primary);
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px dashed rgba(139, 92, 246, 0.4);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-add-project:hover {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+
+/* Media Type Filter Tabs */
+.media-type-tabs {
+  display: flex;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 2px;
+}
+
+.media-type-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.media-type-tab:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.media-type-tab.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.media-type-tab.video.active {
+  background: rgba(139, 92, 246, 0.2);
+  color: #c084fc;
+}
+
+.media-type-tab.image.active {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+}
+
+.media-type-tab.audio.active {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
+
+.tab-count {
+  font-size: 10px;
+  opacity: 0.75;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 1px 5px;
+  border-radius: 8px;
+}
+
+/* Search Box & Sort */
+.library-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.library-search-box .search-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.library-search-input {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  padding: 6px 28px 6px 32px;
+  font-size: 12px;
+  color: var(--text-primary);
+  width: 220px;
+  transition: all 0.2s;
+}
+
+.library-search-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  width: 260px;
+  box-shadow: 0 0 8px var(--primary-glow);
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.search-clear-btn:hover {
+  color: var(--text-primary);
+}
+
+.library-sort-select {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  outline: none;
+}
+
+.library-sort-select:focus {
+  border-color: var(--primary);
+}
+
+/* Badges on Media Cards */
+.media-type-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  backdrop-filter: blur(6px);
+  z-index: 2;
+}
+
+.media-type-badge.video {
+  background: rgba(139, 92, 246, 0.85);
+  color: #ffffff;
+}
+
+.media-type-badge.image {
+  background: rgba(14, 165, 233, 0.85);
+  color: #ffffff;
+}
+
+.media-type-badge.audio {
+  background: rgba(16, 185, 129, 0.85);
+  color: #ffffff;
+}
+
+.media-project-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid;
+  cursor: pointer;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.media-project-tag:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.15);
+}
+
+.btn-assign-quick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  color: var(--text-muted);
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-assign-quick:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(139, 92, 246, 0.08);
+}
+
+/* Drag and Drop Overlay */
+.library-drag-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--primary);
+  border-radius: 16px;
+  pointer-events: none;
+}
+
+.library-drag-box {
+  text-align: center;
+  padding: 40px;
+  color: #ffffff;
+}
+
+.drag-bounce-icon {
+  color: var(--primary);
+  margin-bottom: 16px;
+  animation: bounce 1s infinite alternate ease-in-out;
+}
+
+@keyframes bounce {
+  from { transform: translateY(0); }
+  to { transform: translateY(-10px); }
+}
+
+/* Import Progress Banner */
+.import-progress-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  margin-bottom: 18px;
+  border-left: 4px solid var(--primary);
+  background: rgba(30, 41, 59, 0.85);
+}
+
+.import-progress-spin {
+  width: 22px;
+  height: 22px;
+  border: 3px solid rgba(139, 92, 246, 0.25);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.import-progress-track {
+  width: 100%;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.import-progress-fill {
+  height: 100%;
+  background: var(--primary);
+  transition: width 0.2s ease;
+}
+
+/* Image Lightbox Modal */
+.image-lightbox-content {
+  max-width: 90vw;
+  max-height: 90vh;
+  width: 850px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.image-lightbox-body {
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: #020306;
+  min-height: 380px;
+  max-height: 65vh;
+  overflow: auto;
+}
+
+.image-lightbox-preview {
+  max-width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+}
+
+/* Audio Player Modal */
+.audio-player-modal-content {
+  width: 500px;
+  max-width: 92vw;
+  display: flex;
+  flex-direction: column;
+}
+
+.audio-modal-body {
+  padding: 30px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.audio-visual-circle {
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #38bdf8 0%, #1e1b4b 70%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  box-shadow: 0 0 25px rgba(56, 189, 248, 0.35);
+  margin-bottom: 12px;
+}
+
+.audio-spin-icon {
+  animation: pulse 2s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0% { transform: scale(0.95); opacity: 0.85; }
+  50% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.85; }
+}
+
+.audio-html-player {
+  width: 100%;
+  margin-top: 24px;
+  border-radius: 8px;
+  outline: none;
+}
+
+/* Project Dialog & Assign Dialog */
+.project-modal-content, .assign-modal-content {
+  width: 440px;
+  max-width: 92vw;
+}
+
+.color-picker-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s;
+}
+
+.color-picker-dot:hover {
+  transform: scale(1.15);
+}
+
+.color-picker-dot.active {
+  border-color: #ffffff;
+  transform: scale(1.2);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+}
+
+.assign-project-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.assign-project-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.assign-project-item.selected {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: var(--primary);
+  color: #c084fc;
+}
+
 /* Video Player Modal Overlay */
 .modal-overlay {
   position: fixed;
