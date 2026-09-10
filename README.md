@@ -167,6 +167,7 @@
 | **Transcription (STT)** | **Groq Whisper Large v3** | Free key on [console.groq.com](https://console.groq.com) | **Free tier available** (Ultra fast ~1s) | ✅ Allowed |
 | **Subtitle Translation** | **Groq LLM / OpenAI** | Same Groq / OpenAI key | **< $0.001 per video** | ✅ Allowed |
 | **Voiceover (Free)** | **Local Windows Speech** | ❌ **No key needed (100% Offline)** | **Free forever** | ✅ Allowed |
+| **Voiceover (Ultra-Realistic)** | **ElevenLabs (`eleven_multilingual_v2`)** | Free key on [elevenlabs.io](https://elevenlabs.io) | **10,000 chars/month FREE** (No credit card required) | ✅ Free tier (Attribution) / Commercial (Paid) |
 | **Voiceover (HD Studio)** | **OpenAI TTS (`tts-1`)** | Key on [platform.openai.com](https://platform.openai.com) | **$0.015 / 1k chars** (~$0.06 for 5 min video) | ✅ 100% Commercial Rights |
 
 > 🔒 **Privacy Guarantee**: All API keys are stored exclusively in your local machine storage (`localStorage`). They are never transmitted to any third-party telemetry server.
@@ -192,7 +193,7 @@
 - **Frontend UI**: [React 19](https://react.dev) + [TypeScript](https://www.typescriptlang.org/) + [Vite](https://vitejs.dev)
 - **AI Webcam Segmentation**: [Google MediaPipe Selfie Segmentation](https://developers.google.com/mediapipe) (WASM/TFLite, 100% offline & local)
 - **Video & MP4 Encoding**: Native FFmpeg Rust pipeline (H.264 / AAC `+faststart`), WebCodecs / MediaRecorder (VP9/VP8/H.264)
-- **Speech Recognition & TTS**: Groq Whisper Large v3, OpenAI TTS-1, Web Speech API
+- **Speech Recognition & TTS**: Groq Whisper Large v3, ElevenLabs Multilingual v2, OpenAI TTS-1, Web Speech API
 - **Audio Processing**: Web Audio API (PCM silence detection, RMS analysis, BiquadFilter, DynamicsCompressor)
 - **Icons**: [Lucide React](https://lucide.dev)
 - **Local Storage**: IndexedDB (100% offline and private)
@@ -368,6 +369,7 @@ npm run tauri build
 | **Transcription (STT)** | **Groq Whisper Large v3** | Clé gratuite sur [console.groq.com](https://console.groq.com) | **Gratuit (Quota offert)** (Vitesse ~1s) | ✅ Autorisés |
 | **Traduction Sous-titres** | **Groq LLM / OpenAI** | Même clé Groq ou OpenAI | **< 0,001 € par vidéo** | ✅ Autorisés |
 | **Voix Off (Gratuite)** | **Voix Locales Windows** | ❌ **Aucune clé (100% Hors-ligne)** | **100% Gratuit à vie** | ✅ Autorisés |
+| **Voix Off Ultra-Réaliste** | **ElevenLabs (`eleven_multilingual_v2`)** | Clé gratuite sur [elevenlabs.io](https://elevenlabs.io) | **10 000 caractères/mois GRATUITS** (Sans carte bancaire) | ✅ Gratuit (avec attribution) / Commercial (payant) |
 | **Voix Off HD Studio** | **OpenAI TTS (`tts-1`)** | Clé sur [platform.openai.com](https://platform.openai.com) | **0,015 $ / 1 000 car.** (~0,06 € pour 5 min) | ✅ 100% Propriétaire & Monétisable |
 
 > 🔒 **Confidentialité Totale** : Vos clés d'API sont stockées exclusivement sur votre PC local (`localStorage`). Elles ne sont jamais envoyées à un serveur intermédiaire tiers.
