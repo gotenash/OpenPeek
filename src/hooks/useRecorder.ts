@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { saveRecording, type SavedVideo } from '../utils/db';
+import { saveRecording, saveProject, type SavedVideo } from '../utils/db';
 import { webcamSegmenter, type WebcamBackgroundEffect, type WebcamVirtualBg } from '../utils/webcamSegmenter';
 import { repairWebmDuration } from '../utils/webmDurationPatcher';
+import { type EditorProject } from '../utils/videoCompositor';
 
 export interface RecorderOptions {
   resolution: '1080p' | '720p' | '4k';
@@ -37,6 +38,10 @@ export interface RecorderOptions {
   enableKeystrokeHUD?: boolean;
   keystrokeHUDPosition?: 'bottom-center' | 'bottom-left' | 'bottom-right' | 'top-right';
   selectedMonitorId?: string;
+  enableSecondaryCam?: boolean;
+  selectedSecondaryCamId?: string;
+  secondaryCamAudio?: boolean;
+  secondaryCamShortcut?: string;
 }
 
 export type DrawTool = 'pen' | 'arrow' | 'rect' | 'highlighter';
@@ -69,12 +74,17 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
   const [micLevel, setMicLevel] = useState(0);
   const [countdown, setCountdown] = useState<number | null>(null);
   const countdownTimerRef = useRef<number | null>(null);
+  const [isSecondaryCamRecording, setIsSecondaryCamRecording] = useState<boolean>(false);
+  const [secondaryCamStream, setSecondaryCamStream] = useState<MediaStream | null>(null);
+  const isSecondaryCamRecordingRef = useRef<boolean>(false);
   const isPreviewingRef = useRef(false);
   const isRecordingRef = useRef(false);
   const isPausedRef = useRef(false);
   const countdownRef = useRef<number | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
+
+  useEffect(() => { isSecondaryCamRecordingRef.current = isSecondaryCamRecording; }, [isSecondaryCamRecording]);
 
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
@@ -142,6 +152,11 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
   const screenStreamRef = useRef<MediaStream | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const webcamStreamRef = useRef<MediaStream | null>(null);
+  const secondaryCamStreamRef = useRef<MediaStream | null>(null);
+  const secondaryCamRecorderRef = useRef<MediaRecorder | null>(null);
+  const secondaryCamChunksRef = useRef<Blob[]>([]);
+  const secondaryCamSegmentsRef = useRef<{ blob: Blob; startTime: number; duration: number }[]>([]);
+  const secondaryCamStartTimestampRef = useRef<number>(0);
   
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
   const webcamVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -243,9 +258,13 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     }
     try {
       import('@tauri-apps/api/core').then(({ invoke }) => {
-        invoke('set_active_capture_monitor', { monitorId: 'prompt' }).catch(() => {});
+        invoke('set_active_capture_monitor', { monitorId: 'prompt' }).catch((err) => {
+          console.debug('[Recorder] Reset capture monitor error:', err);
+        });
       });
-    } catch {}
+    } catch (err) {
+      console.debug('[Recorder] Tauri API unavailable for reset monitor:', err);
+    }
     if (screenStreamRef.current) {
       screenStreamRef.current.getTracks().forEach(t => t.stop());
       screenStreamRef.current = null;
@@ -258,6 +277,21 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       webcamStreamRef.current.getTracks().forEach(t => t.stop());
       webcamStreamRef.current = null;
     }
+    if (secondaryCamRecorderRef.current && secondaryCamRecorderRef.current.state !== 'inactive') {
+      try {
+        secondaryCamRecorderRef.current.stop();
+      } catch (err) {
+        console.warn('[Recorder] Error stopping secondaryCamRecorder on cleanup:', err);
+      }
+      secondaryCamRecorderRef.current = null;
+    }
+    if (secondaryCamStreamRef.current) {
+      secondaryCamStreamRef.current.getTracks().forEach(t => t.stop());
+      secondaryCamStreamRef.current = null;
+      setSecondaryCamStream(null);
+    }
+    setIsSecondaryCamRecording(false);
+    isSecondaryCamRecordingRef.current = false;
     
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
       audioContextRef.current.close();
@@ -266,7 +300,11 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
 
     if (audioNodesRef.current.length > 0) {
       audioNodesRef.current.forEach(node => {
-        try { node.disconnect(); } catch (e) {}
+        try {
+          node.disconnect();
+        } catch (e) {
+          console.debug('[Recorder] Audio node disconnect error (already disconnected):', e);
+        }
       });
       audioNodesRef.current = [];
     }
@@ -881,7 +919,9 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         await invoke('set_active_capture_monitor', { monitorId: options.selectedMonitorId || 'prompt' });
-      } catch {}
+      } catch (err) {
+        console.debug('[Recorder] set_active_capture_monitor failed during preview:', err);
+      }
 
       screenStream.getVideoTracks()[0].onended = () => {
         stopScreenPreview();
@@ -994,7 +1034,9 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         try {
           const { invoke } = await import('@tauri-apps/api/core');
           await invoke('set_active_capture_monitor', { monitorId: options.selectedMonitorId || 'prompt' });
-        } catch {}
+        } catch (err) {
+          console.debug('[Recorder] set_active_capture_monitor failed during start:', err);
+        }
 
         screenStream.getVideoTracks()[0].onended = () => {
           stopRecording();
@@ -1225,6 +1267,37 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         }
       }
 
+      // 5b. Setup Secondary Camera (B-Roll / Iriun Webcam) stream if enabled
+      secondaryCamSegmentsRef.current = [];
+      if (opts.enableSecondaryCam && opts.selectedSecondaryCamId) {
+        try {
+          const secStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { exact: opts.selectedSecondaryCamId },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 }
+            },
+            audio: opts.secondaryCamAudio ? true : false
+          });
+          secondaryCamStreamRef.current = secStream;
+          setSecondaryCamStream(secStream);
+        } catch (e) {
+          console.warn('Secondary camera exact deviceId failed, fallback to ideal:', e);
+          try {
+            const secStream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                deviceId: { ideal: opts.selectedSecondaryCamId }
+              },
+              audio: opts.secondaryCamAudio ? true : false
+            });
+            secondaryCamStreamRef.current = secStream;
+            setSecondaryCamStream(secStream);
+          } catch (err2) {
+            console.warn('Secondary camera stream initialization failed:', err2);
+          }
+        }
+      }
+
       // 6. Setup Canvas Compositing Engine
       const canvas = document.createElement('canvas');
       const screenSettings = screenStream.getVideoTracks()[0].getSettings();
@@ -1356,12 +1429,18 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       // Broadcast countdown to full-screen transparent overlay
       try {
         import('@tauri-apps/api/event').then(({ emit }) => {
-          emit('countdown-tick', { count: 3 });
+          emit('countdown-tick', { count: 3 }).catch((err) => {
+            console.debug('[Recorder] countdown-tick emit failed:', err);
+          });
         });
         import('@tauri-apps/api/core').then(({ invoke }) => {
-          invoke('show_overlay');
+          invoke('show_overlay').catch((err) => {
+            console.debug('[Recorder] show_overlay invoke failed:', err);
+          });
         });
-      } catch {}
+      } catch (err) {
+        console.debug('[Recorder] Tauri API unavailable for countdown overlay:', err);
+      }
       
       countdownTimerRef.current = window.setInterval(() => {
         count -= 1;
@@ -1369,9 +1448,13 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           setCountdown(count);
           try {
             import('@tauri-apps/api/event').then(({ emit }) => {
-              emit('countdown-tick', { count });
+              emit('countdown-tick', { count }).catch((err) => {
+                console.debug('[Recorder] countdown-tick emit failed:', err);
+              });
             });
-          } catch {}
+          } catch (err) {
+            console.debug('[Recorder] countdown-tick error:', err);
+          }
         } else {
           if (countdownTimerRef.current) {
             clearInterval(countdownTimerRef.current);
@@ -1382,14 +1465,20 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           // 1. Immediately hide the overlay so it is NEVER captured in the video stream
           try {
             import('@tauri-apps/api/event').then(({ emit }) => {
-              emit('countdown-end', {});
+              emit('countdown-end', {}).catch((err) => {
+                console.debug('[Recorder] countdown-end emit failed:', err);
+              });
             });
             if (!isDrawingModeRef.current) {
               import('@tauri-apps/api/core').then(({ invoke }) => {
-                invoke('hide_overlay');
+                invoke('hide_overlay').catch((err) => {
+                  console.debug('[Recorder] hide_overlay invoke failed:', err);
+                });
               });
             }
-          } catch {}
+          } catch (err) {
+            console.debug('[Recorder] hide_overlay error on countdown end:', err);
+          }
 
           // 2. Wait 250ms for Windows Desktop Window Manager to completely flush the overlay from the screen buffer
           setTimeout(() => {
@@ -1470,8 +1559,105 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     }
   };
 
+  // Toggle Secondary Camera (B-Roll) recording segment on/off
+  const toggleSecondaryCamRecording = async () => {
+    if (!isRecordingRef.current) return;
+
+    // If currently recording B-roll, stop current segment
+    if (isSecondaryCamRecordingRef.current) {
+      if (secondaryCamRecorderRef.current && secondaryCamRecorderRef.current.state !== 'inactive') {
+        try {
+          secondaryCamRecorderRef.current.stop();
+        } catch (e) {
+          console.warn('Error stopping secondary cam recorder:', e);
+        }
+      }
+      setIsSecondaryCamRecording(false);
+      isSecondaryCamRecordingRef.current = false;
+      return;
+    }
+
+    // Start B-roll recording segment
+    const stream = secondaryCamStreamRef.current;
+    if (!stream) {
+      console.warn('Cannot start secondary camera recording: stream is not available');
+      return;
+    }
+
+    try {
+      secondaryCamChunksRef.current = [];
+      let totalElapsedMs = accumulatedTimeRef.current;
+      if (recordingStartTimeRef.current > 0) {
+        totalElapsedMs += (Date.now() - recordingStartTimeRef.current);
+      }
+      const startSec = Math.max(0, totalElapsedMs / 1000);
+      secondaryCamStartTimestampRef.current = startSec;
+
+      let mimeType: string = optionsRef.current.codec;
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'video/webm';
+      }
+
+      const recorder = new MediaRecorder(stream, {
+        mimeType,
+        videoBitsPerSecond: 8000000
+      });
+      secondaryCamRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          secondaryCamChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const chunks = [...secondaryCamChunksRef.current];
+        secondaryCamChunksRef.current = [];
+        if (chunks.length > 0) {
+          const rawBlob = new Blob(chunks, { type: mimeType });
+          let totalEndMs = accumulatedTimeRef.current;
+          if (recordingStartTimeRef.current > 0) {
+            totalEndMs += (Date.now() - recordingStartTimeRef.current);
+          }
+          const endSec = Math.max(startSec + 0.5, totalEndMs / 1000);
+          const duration = Math.max(0.5, endSec - startSec);
+          let finalSecBlob = rawBlob;
+          try {
+            finalSecBlob = await repairWebmDuration(rawBlob, duration);
+          } catch (err) {
+            console.warn('[Recorder] Failed to repair secondary camera webm duration:', err);
+          }
+          secondaryCamSegmentsRef.current.push({
+            blob: finalSecBlob,
+            startTime: startSec,
+            duration
+          });
+        }
+      };
+
+      recorder.start(100);
+      setIsSecondaryCamRecording(true);
+      isSecondaryCamRecordingRef.current = true;
+    } catch (e) {
+      console.error('Failed to start secondary camera recording segment:', e);
+    }
+  };
+
   // Stop recording
   const stopRecording = () => {
+    // If secondary cam is actively recording a segment, stop it
+    if (isSecondaryCamRecordingRef.current) {
+      if (secondaryCamRecorderRef.current && secondaryCamRecorderRef.current.state !== 'inactive') {
+        try {
+          secondaryCamRecorderRef.current.stop();
+        } catch (err) {
+          console.debug('[Recorder] secondaryCamRecorder stop error:', err);
+        }
+      }
+      setIsSecondaryCamRecording(false);
+      isSecondaryCamRecordingRef.current = false;
+    }
+
     let totalElapsedMs = accumulatedTimeRef.current;
     if (recordingStartTimeRef.current > 0) {
       totalElapsedMs += (Date.now() - recordingStartTimeRef.current);
@@ -1486,12 +1672,18 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     // Trigger cinema cut animation ("C'est dans la boîte !") on full-screen overlay
     try {
       import('@tauri-apps/api/event').then(({ emit }) => {
-        emit('recording-stopped-animation', { duration: recordedDuration });
+        emit('recording-stopped-animation', { duration: recordedDuration }).catch((err) => {
+          console.debug('[Recorder] recording-stopped-animation emit failed:', err);
+        });
       });
       import('@tauri-apps/api/core').then(({ invoke }) => {
-        invoke('show_overlay');
+        invoke('show_overlay').catch((err) => {
+          console.debug('[Recorder] show_overlay invoke failed:', err);
+        });
       });
-    } catch {}
+    } catch (err) {
+      console.debug('[Recorder] Overlay stop animation error:', err);
+    }
     
     if (workerRef.current) {
       workerRef.current.postMessage({ action: 'stop' });
@@ -1517,12 +1709,14 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     clearBlurMasks();
     try {
       import('@tauri-apps/api/event').then(({ emit }) => {
-        emit('set-drawing-mode', { active: false });
-        emit('unfreeze-snapshot', {});
-        emit('clear-drawings', {});
-        emit('clear-blur-masks', {});
+        emit('set-drawing-mode', { active: false }).catch(() => {});
+        emit('unfreeze-snapshot', {}).catch(() => {});
+        emit('clear-drawings', {}).catch(() => {});
+        emit('clear-blur-masks', {}).catch(() => {});
       });
-    } catch {}
+    } catch (err) {
+      console.debug('[Recorder] Reset drawing events emit error:', err);
+    }
 
     // Reset zoom state
     if (isZoomedRef.current) {
@@ -1532,7 +1726,9 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         import('@tauri-apps/api/event').then(({ emit }) => {
           emit('zoom-hud', { zoomed: false, factor: 1.0, showToast: false, showCorner: false }).catch(() => {});
         });
-      } catch {}
+      } catch (err) {
+        console.debug('[Recorder] zoom-hud emit error on stop:', err);
+      }
     }
 
     // Reset keystrokes
@@ -1601,6 +1797,70 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
 
     try {
       await saveRecording(newVideo);
+
+      // If secondary camera segments were recorded, save them and generate multi-track project for Studio Montage
+      if (secondaryCamSegmentsRef.current.length > 0) {
+        const secVideos: SavedVideo[] = [];
+        for (let i = 0; i < secondaryCamSegmentsRef.current.length; i++) {
+          const seg = secondaryCamSegmentsRef.current[i];
+          const secVideo: SavedVideo = {
+            id: crypto.randomUUID(),
+            title: `Caméra 2 (B-Roll) #${i + 1} - ${formattedDate}`,
+            blob: seg.blob,
+            duration: seg.duration,
+            size: seg.blob.size,
+            date: dateStr
+          };
+          await saveRecording(secVideo);
+          secVideos.push(secVideo);
+        }
+
+        const autoProject: EditorProject = {
+          clips: [
+            {
+              id: `clip_main_${Date.now()}`,
+              type: 'video',
+              track: 1,
+              startTime: 0,
+              video: newVideo,
+              startTrim: 0,
+              endTrim: finalDuration,
+              transitionToNext: 'none',
+              transitionDuration: 1.0,
+              playbackSpeed: 1.0,
+              volume: 1.0
+            },
+            ...secVideos.map((sv, idx) => ({
+              id: `clip_broll_${idx}_${Date.now()}`,
+              type: 'video' as const,
+              track: 2 as const,
+              startTime: secondaryCamSegmentsRef.current[idx]?.startTime || 0,
+              video: sv,
+              startTrim: 0,
+              endTrim: sv.duration || 10,
+              transitionToNext: 'none' as const,
+              transitionDuration: 0.5,
+              playbackSpeed: 1.0,
+              volume: 1.0
+            }))
+          ],
+          titles: [],
+          zooms: [],
+          images: []
+        };
+
+        await saveProject({
+          id: `proj_${Date.now()}`,
+          title: `Projet Multi-Caméra - ${formattedDate}`,
+          date: dateStr,
+          data: JSON.stringify(autoProject),
+          clipCount: 1 + secVideos.length,
+          totalDuration: finalDuration
+        });
+
+        secondaryCamSegmentsRef.current = [];
+      }
+
       if (onSaveComplete) {
         onSaveComplete();
       }
@@ -1661,9 +1921,13 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       osc.stop(now + 0.13);
 
       setTimeout(() => {
-        ctx.close().catch(() => {});
+        ctx.close().catch((err) => {
+          console.debug('[Recorder] AudioContext close error:', err);
+        });
       }, 200);
-    } catch (e) {}
+    } catch (e) {
+      console.debug('[Recorder] playZoomSound error:', e);
+    }
   };
 
   const toggleZoom = (targetX = 0.5, targetY = 0.5) => {
@@ -1711,7 +1975,9 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
             showCorner: shouldShowCorner
           }).catch(() => {});
         });
-      } catch (e) {}
+      } catch (e) {
+        console.debug('[Recorder] zoom-hud HUD error:', e);
+      }
     }
   };
 
@@ -1815,13 +2081,17 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
               color: drawColorRef.current,
               isAutoFade: isAutoFadeRef.current
             });
-          } catch (e) {}
+          } catch (e) {
+            console.debug('[Recorder] freeze-snapshot emit error:', e);
+          }
         }
       }
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         await invoke('show_overlay');
-      } catch (e) {}
+      } catch (e) {
+        console.debug('[Recorder] show_overlay invoke error:', e);
+      }
     } else {
       // Unfreeze
       freezeFrameRef.current = null;
@@ -1831,7 +2101,9 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
         await emit('unfreeze-snapshot', {});
         const { invoke } = await import('@tauri-apps/api/core');
         await invoke('hide_overlay');
-      } catch (e) {}
+      } catch (e) {
+        console.debug('[Recorder] unfreeze-snapshot error:', e);
+      }
     }
   };
 
@@ -2010,7 +2282,9 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
                 import('@tauri-apps/api/event').then(({ emit }) => {
                   emit('keystroke-hud', { combo: event.payload.combo }).catch(() => {});
                 });
-              } catch {}
+              } catch (err) {
+                console.debug('[Recorder] keystroke-hud emit error:', err);
+              }
             }
           }
         });
@@ -2177,7 +2451,8 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       const isAltP = (e.altKey && e.key?.toLowerCase() === 'p') || e.code === 'F7';
       const isAltZ = (e.altKey && e.key?.toLowerCase() === 'z') || e.code === 'F9';
       const isAltD = (e.altKey && e.key?.toLowerCase() === 'd') || e.code === 'F8';
-      const isAltC = (e.altKey && e.key?.toLowerCase() === 'c') || e.code === 'F10';
+      const isAltC = (e.altKey && e.key?.toLowerCase() === 'c');
+      const isAltB = (e.altKey && e.key?.toLowerCase() === 'b') || e.code === (optionsRef.current.secondaryCamShortcut || 'F10');
       const isZ = e.key?.toLowerCase() === 'z' || e.code === 'KeyZ' || e.code === 'KeyW';
       
       if (isAltR) {
@@ -2203,6 +2478,9 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
       } else if (isAltC) {
         e.preventDefault();
         clearDrawings();
+      } else if (isAltB && isRecording) {
+        e.preventDefault();
+        toggleSecondaryCamRecording();
       } else if ((isAltZ || isZ) && (isRecording || isZoomedRef.current || canvasRef.current !== null)) {
         e.preventDefault();
         toggleZoom();
@@ -2264,6 +2542,11 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     updateWebcamPosition,
     setWebcamSize: setWebcamSizePercentage,
     webcamPosition: webcamPosRef.current,
-    webcamRadius: webcamRadiusRef.current
+    webcamRadius: webcamRadiusRef.current,
+    // Secondary Camera (B-Roll / Iriun Webcam) API
+    hasSecondaryCam: Boolean(options.enableSecondaryCam && options.selectedSecondaryCamId),
+    isSecondaryCamRecording,
+    secondaryCamStream,
+    toggleSecondaryCamRecording
   };
 }

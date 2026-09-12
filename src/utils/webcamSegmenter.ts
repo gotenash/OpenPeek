@@ -286,7 +286,9 @@ class WebcamSegmenter {
     if (this.selfieSegmentation) {
       try {
         this.selfieSegmentation.close();
-      } catch (e) {}
+      } catch (e) {
+        console.warn('[WebcamSegmenter] Failed to cleanly close selfie segmentation instance:', e);
+      }
       this.selfieSegmentation = null;
     }
     this.isInitialized = false;

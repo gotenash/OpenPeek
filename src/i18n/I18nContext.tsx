@@ -29,13 +29,17 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     try {
       localStorage.setItem('openpeek_lang', lang);
       document.documentElement.lang = lang;
-    } catch {}
+    } catch (err) {
+      console.warn('[I18n] Failed to persist language to localStorage:', err);
+    }
   };
 
   useEffect(() => {
     try {
       document.documentElement.lang = language;
-    } catch {}
+    } catch (err) {
+      console.warn('[I18n] Failed to update documentElement.lang:', err);
+    }
   }, [language]);
 
   const t = (path: string, fallback?: string): string => {

@@ -116,14 +116,18 @@ export function OverlayCanvas() {
                   try {
                     const { invoke } = await import('@tauri-apps/api/core');
                     await invoke('hide_overlay');
-                  } catch {}
+                  } catch (err) {
+                    console.debug('[Overlay] Failed to invoke hide_overlay:', err);
+                  }
                 }
               }, 1400);
             } else if (!isZoomed && !isDrawingRef.current && !snapshotUrl) {
               try {
                 const { invoke } = await import('@tauri-apps/api/core');
                 await invoke('hide_overlay');
-              } catch {}
+              } catch (err) {
+                console.debug('[Overlay] Failed to invoke hide_overlay:', err);
+              }
             }
           }
         });
@@ -151,7 +155,9 @@ export function OverlayCanvas() {
                 try {
                   const { invoke } = await import('@tauri-apps/api/core');
                   await invoke('hide_overlay');
-                } catch {}
+                } catch (err) {
+                  console.debug('[Overlay] Failed to invoke hide_overlay:', err);
+                }
               }
             }, 2200);
           }
@@ -173,10 +179,14 @@ export function OverlayCanvas() {
             try {
               const { invoke } = await import('@tauri-apps/api/core');
               await invoke('hide_overlay');
-            } catch {}
+            } catch (err) {
+              console.debug('[Overlay] Failed to invoke hide_overlay:', err);
+            }
           }, 1600);
         });
-      } catch (e) {}
+      } catch (e) {
+        console.debug('[Overlay] Tauri event listeners setup failed:', e);
+      }
     }
 
     setupListeners();
@@ -235,13 +245,17 @@ export function OverlayCanvas() {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('hide_overlay');
-    } catch (e) {}
+    } catch (e) {
+      console.debug('[Overlay] hide_overlay failed on close:', e);
+    }
     try {
       const { emit } = await import('@tauri-apps/api/event');
       await emit('exit-draw', {});
       await emit('set-drawing-mode', { active: false });
       await emit('unfreeze-snapshot', {});
-    } catch {}
+    } catch (err) {
+      console.debug('[Overlay] Failed to emit exit-draw events:', err);
+    }
   };
 
   const clearAll = async () => {
@@ -252,7 +266,9 @@ export function OverlayCanvas() {
       const { emit } = await import('@tauri-apps/api/event');
       await emit('clear-drawings', {});
       await emit('clear-blur-masks', {});
-    } catch (e) {}
+    } catch (e) {
+      console.debug('[Overlay] Failed to emit clear events:', e);
+    }
   };
 
   // Continuous 60 FPS rendering loop for overlay
@@ -382,7 +398,9 @@ export function OverlayCanvas() {
     try {
       const { emit } = await import('@tauri-apps/api/event');
       await emit('sync-draw-settings', { tool: newTool, color, isAutoFade });
-    } catch {}
+    } catch (err) {
+      console.debug('[Overlay] sync-draw-settings error:', err);
+    }
   };
 
   const changeColor = async (newColor: string) => {
@@ -390,7 +408,9 @@ export function OverlayCanvas() {
     try {
       const { emit } = await import('@tauri-apps/api/event');
       await emit('sync-draw-settings', { tool, color: newColor, isAutoFade });
-    } catch {}
+    } catch (err) {
+      console.debug('[Overlay] sync-draw-settings error:', err);
+    }
   };
 
   const toggleAutoFade = async () => {
@@ -399,7 +419,9 @@ export function OverlayCanvas() {
     try {
       const { emit } = await import('@tauri-apps/api/event');
       await emit('sync-draw-settings', { tool, color, isAutoFade: next });
-    } catch {}
+    } catch (err) {
+      console.debug('[Overlay] sync-draw-settings error:', err);
+    }
   };
 
   const handleMouseDown = async (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -427,7 +449,9 @@ export function OverlayCanvas() {
         width: strokeWidth,
         fadeDuration
       });
-    } catch {}
+    } catch (err) {
+      console.debug('[Overlay] overlay-draw-start error:', err);
+    }
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -457,7 +481,9 @@ export function OverlayCanvas() {
       import('@tauri-apps/api/event').then(({ emit }) => {
         emit('overlay-draw-point', { x: ptX, y: ptY }).catch(() => {});
       });
-    } catch {}
+    } catch (err) {
+      console.debug('[Overlay] overlay-draw-point error:', err);
+    }
   };
 
   const handleMouseUp = () => {
@@ -476,7 +502,9 @@ export function OverlayCanvas() {
         import('@tauri-apps/api/event').then(({ emit }) => {
           emit('overlay-draw-end', {}).catch(() => {});
         });
-      } catch {}
+      } catch (err) {
+        console.debug('[Overlay] overlay-draw-end error:', err);
+      }
     }
     isDrawingRef.current = false;
   };

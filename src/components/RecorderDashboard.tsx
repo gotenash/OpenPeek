@@ -617,6 +617,36 @@ export function RecorderDashboard({ options, setOptions, recorder }: RecorderDas
                 </>
               )}
             </div>
+
+            {/* Secondary Camera (B-Roll) Toolbar if enabled */}
+            {(options.enableSecondaryCam || recorder.hasSecondaryCam) && (
+              <div className="glass-panel zoom-toolbar" style={{ borderColor: recorder.isSecondaryCamRecording ? '#ef4444' : 'rgba(56, 189, 248, 0.3)', flexWrap: 'wrap' }}>
+                <button 
+                  className={`btn-toolbar ${recorder.isSecondaryCamRecording ? 'active' : ''}`}
+                  onClick={recorder.toggleSecondaryCamRecording}
+                  title={`Basculer la Caméra Secondaire B-Roll (${options.secondaryCamShortcut || 'F10'} ou Alt+B). Enregistre un plan plein écran qui apparaîtra sur la Piste V2 du studio.`}
+                  style={recorder.isSecondaryCamRecording ? {
+                    backgroundColor: 'rgba(239, 68, 68, 0.25)',
+                    borderColor: '#ef4444',
+                    color: '#f87171'
+                  } : {
+                    borderColor: 'rgba(56, 189, 248, 0.4)',
+                    color: '#38bdf8'
+                  }}
+                >
+                  <Video size={16} />
+                  <span>{recorder.isSecondaryCamRecording ? '🔴 Plan B-Roll V2 en cours' : '📹 Caméra B-Roll (Iriun / USB)'}</span>
+                  <span className="shortcut-badge" style={{ backgroundColor: recorder.isSecondaryCamRecording ? 'rgba(239, 68, 68, 0.4)' : 'rgba(56, 189, 248, 0.2)', color: recorder.isSecondaryCamRecording ? '#fff' : '#38bdf8' }}>
+                    {options.secondaryCamShortcut || 'F10'} / Alt+B
+                  </span>
+                </button>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  {recorder.isSecondaryCamRecording 
+                    ? 'Plan en cours : sera placé automatiquement en plein écran sur la Piste V2 du Studio'
+                    : 'Appuyez sur ' + (options.secondaryCamShortcut || 'F10') + ' pour filmer un objet ou document en plein écran'}
+                </span>
+              </div>
+            )}
           </div>
         )}
 
@@ -998,6 +1028,69 @@ export function RecorderDashboard({ options, setOptions, recorder }: RecorderDas
           )}
         </div>
       </div>
+
+      {/* Floating framing window for Secondary Camera during active B-Roll capture */}
+      {isRecording && recorder.isSecondaryCamRecording && recorder.secondaryCamStream && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            width: '320px',
+            background: 'rgba(15, 23, 42, 0.95)',
+            backdropFilter: 'blur(16px)',
+            border: '2px solid #ef4444',
+            borderRadius: '12px',
+            overflow: 'hidden',
+            boxShadow: '0 16px 36px rgba(0, 0, 0, 0.7), 0 0 20px rgba(239, 68, 68, 0.35)',
+            zIndex: 99999,
+            display: 'flex',
+            flexDirection: 'column'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(239, 68, 68, 0.2)', borderBottom: '1px solid rgba(239, 68, 68, 0.3)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444', display: 'inline-block' }} />
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#fca5a5', letterSpacing: '0.5px' }}>
+                CAMÉRA 2 (B-ROLL V2)
+              </span>
+            </div>
+            <button
+              onClick={recorder.toggleSecondaryCamRecording}
+              style={{
+                background: 'rgba(239, 68, 68, 0.85)',
+                border: 'none',
+                color: '#fff',
+                borderRadius: '4px',
+                padding: '3px 8px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+              title={`Terminer le plan B-Roll (${options.secondaryCamShortcut || 'F10'})`}
+            >
+              Terminer ({options.secondaryCamShortcut || 'F10'})
+            </button>
+          </div>
+          <div style={{ position: 'relative', width: '100%', aspectRatio: '16/9', background: '#000' }}>
+            <video
+              ref={(el) => {
+                if (el && el.srcObject !== recorder.secondaryCamStream) {
+                  el.srcObject = recorder.secondaryCamStream;
+                }
+              }}
+              autoPlay
+              playsInline
+              muted
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          </div>
+          <div style={{ padding: '6px 12px', fontSize: '10px', color: 'rgba(255,255,255,0.7)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0,0,0,0.4)' }}>
+            <span>Retour cadrage (non incrusté dans la capture)</span>
+            {options.secondaryCamAudio && <span style={{ color: '#4ade80', fontWeight: 600 }}>🎙️ Audio Caméra 2</span>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

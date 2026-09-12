@@ -112,8 +112,9 @@ export async function resolveAccurateBlobDuration(
         if (audioBuffer && isFinite(audioBuffer.duration) && audioBuffer.duration > 0.5) {
           return audioBuffer.duration;
         }
-      } catch {
+      } catch (err) {
         // Fall through to video element probing if no audio track or decode fails
+        console.debug('[Subtitles] AudioContext decode fallback to video element probe:', err);
       } finally {
         audioCtx.close().catch(() => {});
       }
@@ -156,7 +157,8 @@ export async function resolveAccurateBlobDuration(
       }
       try {
         video.currentTime = 1e101;
-      } catch {
+      } catch (err) {
+        console.debug('[Subtitles] Video element currentTime probe error:', err);
         clearTimeout(timeout);
         finish(fallbackDuration || 10);
       }
@@ -213,7 +215,8 @@ export async function getAccurateVideoDuration(
 
     try {
       video.currentTime = 1e101;
-    } catch {
+    } catch (err) {
+      console.debug('[Subtitles] Video duration probe seek failed:', err);
       clearTimeout(timeout);
       finish();
     }
@@ -588,7 +591,8 @@ ${inputList}`;
       } else {
         translated.push(cue);
       }
-    } catch {
+    } catch (err) {
+      console.warn('[Subtitles] Translation request failed for cue, preserving original:', cue.text, err);
       translated.push(cue);
     }
   }
@@ -860,7 +864,11 @@ export async function transcribeVideoLocally(
         const finish = () => {
           if (isCompleted) return;
           isCompleted = true;
-          try { recognition.stop(); } catch {}
+          try {
+            recognition.stop();
+          } catch (err) {
+            console.debug('[Subtitles] SpeechRecognition stop error:', err);
+          }
           video.pause();
           resolve();
         };
@@ -902,7 +910,8 @@ export async function transcribeVideoLocally(
           recognition.start();
           video.currentTime = 0;
           video.play().catch(finish);
-        } catch {
+        } catch (err) {
+          console.warn('[Subtitles] SpeechRecognition start failed:', err);
           finish();
         }
       });
@@ -1357,7 +1366,8 @@ export async function renderSubtitledGif(
 
         try {
           video.currentTime = time;
-        } catch {
+        } catch (err) {
+          console.debug('[Subtitles] Frame seek error during GIF export:', err);
           done();
         }
       });

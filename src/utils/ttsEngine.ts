@@ -301,7 +301,9 @@ async function synthesizeSpeechLocallyToBlob(
     if (mimeType) {
       try {
         recorder = new MediaRecorder(dest.stream, { mimeType });
-      } catch {}
+      } catch (err) {
+        console.warn('[TTS] Failed to initialize MediaRecorder with mimeType:', mimeType, err);
+      }
     }
 
     const chunks: Blob[] = [];
@@ -341,7 +343,8 @@ async function synthesizeSpeechLocallyToBlob(
       const estDuration = Math.max(3, (text.split(' ').length / (3 * speed)) + 2);
       setTimeout(finish, estDuration * 1000);
     });
-  } catch {
+  } catch (err) {
+    console.warn('[TTS] Speech synthesis recording failed, falling back to synthetic audio:', err);
     return generateSpeechPacedAudioWav(text, speed);
   }
 }

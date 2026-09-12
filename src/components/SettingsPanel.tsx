@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { RecorderOptions } from '../hooks/useRecorder';
 import { 
-  Camera, Mic, ShieldAlert, Monitor, Volume2, Keyboard, Sparkles, Languages, ZoomIn, MousePointer,
+  Camera, Video, Mic, ShieldAlert, Monitor, Volume2, Keyboard, Sparkles, Languages, ZoomIn, MousePointer,
   Key, Eye, EyeOff, Check, ExternalLink, ShieldCheck, Trash2, CheckCircle2, AlertCircle, RefreshCw
 } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
@@ -205,7 +205,9 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
               vStream.getTracks().forEach(t => t.stop());
               devices = await navigator.mediaDevices.enumerateDevices();
               videoDevices = devices.filter(d => d.kind === 'videoinput');
-            } catch (err) {}
+            } catch (err) {
+              console.debug('[SettingsPanel] Video device permission pre-grant declined:', err);
+            }
           }
         }
 
@@ -284,6 +286,54 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
       }
     };
   }, [options.showWebcam, options.selectedCamId, isRecording, activeTab]);
+
+  const [secondaryPreviewStream, setSecondaryPreviewStream] = useState<MediaStream | null>(null);
+  const secondaryVideoRef = React.useRef<HTMLVideoElement | null>(null);
+
+  // Secondary Webcam live preview management
+  useEffect(() => {
+    let active = true;
+    let streamToCleanup: MediaStream | null = null;
+
+    async function startSecondaryPreview() {
+      if (document.hidden || !options.enableSecondaryCam || !options.selectedSecondaryCamId || isRecording || activeTab !== 'webcam') {
+        setSecondaryPreviewStream(null);
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            deviceId: { ideal: options.selectedSecondaryCamId },
+            width: { ideal: 640 },
+            height: { ideal: 360 }
+          }
+        });
+        
+        if (active) {
+          setSecondaryPreviewStream(stream);
+          streamToCleanup = stream;
+          if (secondaryVideoRef.current) {
+            secondaryVideoRef.current.srcObject = stream;
+            secondaryVideoRef.current.play().catch(() => {});
+          }
+        } else {
+          stream.getTracks().forEach(t => t.stop());
+        }
+      } catch (err) {
+        console.warn('Failed to start secondary webcam preview:', err);
+      }
+    }
+
+    startSecondaryPreview();
+
+    return () => {
+      active = false;
+      if (streamToCleanup) {
+        streamToCleanup.getTracks().forEach(t => t.stop());
+      }
+    };
+  }, [options.enableSecondaryCam, options.selectedSecondaryCamId, isRecording, activeTab]);
 
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const previewCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -921,7 +971,8 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
 
       {/* Tab 3: Webcam & Facecam */}
       {activeTab === 'webcam' && (
-        <div className="glass-panel settings-card" style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div className="glass-panel settings-card" style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <h2 className="settings-card-title" style={{ fontSize: '15px', marginBottom: '4px' }}>
             <Camera size={18} className="logo-icon-inline" style={{ verticalAlign: 'middle', marginRight: '8px' }} />
             Incrustation Caméra (Facecam)
@@ -1312,6 +1363,139 @@ export function SettingsPanel({ options, setOptions, isRecording = false }: Sett
             </div>
           )}
         </div>
+
+        {/* Card 2: Caméra Secondaire (B-Roll / Iriun Webcam) */}
+        <div className="glass-panel settings-card" style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 className="settings-card-title" style={{ fontSize: '15px', margin: 0 }}>
+              <Video size={18} className="logo-icon-inline" style={{ verticalAlign: 'middle', marginRight: '8px', color: '#a855f7' }} />
+              Caméra Secondaire B-Roll (Iriun Webcam, USB, etc.)
+            </h2>
+            <span style={{ fontSize: '10px', background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.4)', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>
+              Piste V2 Auto
+            </span>
+          </div>
+
+          <div className="form-group">
+            <label className="form-checkbox-row" style={{ cursor: 'pointer' }}>
+              <input 
+                type="checkbox" 
+                className="form-checkbox" 
+                checked={Boolean(options.enableSecondaryCam)}
+                onChange={() => handleCheckbox('enableSecondaryCam')}
+              />
+              <span className="form-label" style={{ margin: 0, fontSize: '13px', fontWeight: 600 }}>
+                Activer la Caméra Secondaire (Prise de vue B-Roll)
+              </span>
+            </label>
+            <p className="form-help" style={{ marginLeft: '26px', marginTop: '2px', fontSize: '11px' }}>
+              Idéal pour filmer un smartphone (Iriun Webcam, DroidCam), un objet, un appareil physique ou un document. S'active en direct pendant la capture et se place automatiquement en plein écran sur la Piste V2 du Studio de Montage.
+            </p>
+          </div>
+
+          {options.enableSecondaryCam && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: '16px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label className="form-label" style={{ fontSize: '12px' }}>Périphérique Caméra Secondaire (B-Roll)</label>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <Video size={16} color="#a855f7" />
+                    <select 
+                      className="form-select" 
+                      style={{ flexGrow: 1, padding: '6px 10px', fontSize: '13px' }}
+                      value={options.selectedSecondaryCamId || ''} 
+                      onChange={(e) => handleSelect('selectedSecondaryCamId', e.target.value)}
+                    >
+                      <option value="">Sélectionner une caméra...</option>
+                      {cams.map(cam => (
+                        <option key={cam.deviceId} value={cam.deviceId}>
+                          {cam.label || `Caméra (${cam.deviceId.slice(0, 8)}...)`}
+                          {cam.label?.toLowerCase().includes('iriun') ? ' 📱 (Iriun Phone)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Option audio mixage */}
+                <label className="form-checkbox-row" style={{ cursor: 'pointer' }}>
+                  <input 
+                    type="checkbox" 
+                    className="form-checkbox" 
+                    checked={options.secondaryCamAudio !== false}
+                    onChange={() => handleCheckbox('secondaryCamAudio')}
+                  />
+                  <span className="form-label" style={{ margin: 0, fontSize: '12px', fontWeight: 600 }}>
+                    🎙️ Capturer l'audio de la caméra secondaire (pour mixage au montage)
+                  </span>
+                </label>
+
+                {/* Raccourci activation */}
+                <div>
+                  <label className="form-label" style={{ fontSize: '12px' }}>Raccourci d'activation en direct</label>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <select
+                      className="form-select"
+                      style={{ width: '150px', padding: '5px 10px', fontSize: '12px' }}
+                      value={options.secondaryCamShortcut || 'F10'}
+                      onChange={(e) => handleSelect('secondaryCamShortcut', e.target.value)}
+                    >
+                      <option value="F10">Touche F10</option>
+                      <option value="F8">Touche F8</option>
+                      <option value="F11">Touche F11</option>
+                      <option value="KeyB">Alt + B</option>
+                    </select>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      Déclenche et coupe la prise de vue B-Roll pendant l'enregistrement.
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{
+                  backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                  border: '1px solid rgba(168, 85, 247, 0.25)',
+                  borderRadius: '6px',
+                  padding: '8px 12px',
+                  fontSize: '11px',
+                  color: '#e9d5ff',
+                  lineHeight: '1.4'
+                }}>
+                  💡 <strong>Comment ça marche ?</strong> Dès que vous appuyez sur le raccourci, une fenêtre flottante de retour visuel s'ouvre pour vous aider à cadrer. Le clip vidéo sera automatiquement calé sur la Piste V2 du Studio de Montage en plein écran !
+                </div>
+              </div>
+
+              {/* Live Preview of Secondary Camera */}
+              <div style={{
+                borderRadius: '8px',
+                overflow: 'hidden',
+                position: 'relative',
+                border: '2px solid rgba(168, 85, 247, 0.5)',
+                background: '#0a0a0a',
+                width: '200px',
+                height: '125px',
+                margin: '0 auto',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 16px rgba(168, 85, 247, 0.25)'
+              }}>
+                {secondaryPreviewStream ? (
+                  <video
+                    ref={secondaryVideoRef}
+                    muted
+                    playsInline
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                ) : (
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', padding: '10px' }}>
+                    {options.selectedSecondaryCamId ? 'Chargement caméra 2...' : 'Sélectionnez une caméra'}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
       )}
 
       {/* Tab 4: Shortcuts Cheatsheet & Language */}

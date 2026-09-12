@@ -26,9 +26,10 @@ Ce document vous guide pas à pas dans la découverte et la maîtrise de toutes 
 16. [🔖 Les Chapitres YouTube dans le Studio](#-16-les-chapitres-youtube-dans-le-studio)
 17. [🖼️ Incrustation d'Images, Logos & Filigranes](#️-17-incrustation-dimages-logos--filigranes)
 18. [🎭 Floutage d'Arrière-Plan & Fonds Virtuels Webcam (Bokeh / Chroma Key)](#-18-floutage-darrière-plan--fonds-virtuels-webcam-bokeh--chroma-key)
-19. [📁 Organisation de la Bibliothèque Locale (Projets & Filtres Médias)](#-19-organisation-de-la-bibliothèque-locale-projets--filtres-médias)
-20. [🛡️ Confidentialité & Données Locales](#️-20-confidentialité--données-locales)
-21. [🖥️ Spécifications & Prérequis Matériels (GPU, CPU, RAM)](#️-21-spécifications--prérequis-matériels-gpu-cpu-ram)
+19. [📹 Caméra Secondaire B-Roll & Cadrage en Direct (Iriun Webcam / USB)](#-19-caméra-secondaire-b-roll--cadrage-en-direct-iriun-webcam--usb)
+20. [📁 Organisation de la Bibliothèque Locale (Projets & Filtres Médias)](#-20-organisation-de-la-bibliothèque-locale-projets--filtres-médias)
+21. [🛡️ Confidentialité & Données Locales](#-21-confidentialité--données-locales)
+22. [🖥️ Spécifications & Prérequis Matériels (GPU, CPU, RAM)](#-22-spécifications--prérequis-matériels-gpu-cpu-ram)
 
 ---
 
@@ -118,7 +119,8 @@ Ces raccourcis fonctionnent **partout sous Windows**, même si OpenPeek est mini
 | **`F7`** | **`Alt + P`** | **Pause / Reprise** | Suspend temporairement l'enregistrement sans couper la vidéo |
 | **`F9`** | **`Alt + Z`** | **Zoom 2x sur le Curseur** | Zoome immédiatement sur la position exacte de votre souris |
 | **`F8`** | **`Alt + D`** | **Mode Dessin & Annotation** | Gèle l'écran et ouvre la palette d'outils de dessin |
-| **`F10`** | **`Alt + C`** | **Effacer les Dessins** | Nettoie instantanément tous les traits d'annotation à l'écran |
+| **`F10`** | **`Alt + B`** | **Caméra B-Roll (Piste V2)** | Déclenche ou arrête l'enregistrement de la caméra 2 (Iriun / USB) |
+| **`Alt + C`** | — | **Effacer les Dessins** | Nettoie instantanément tous les traits d'annotation à l'écran |
 | **`Échap`** | — | **Quitter le Dessin** | Dégèle l'écran et referme la palette pour reprendre le contrôle |
 
 ---
@@ -160,7 +162,19 @@ En haut à droite de la timeline, basculez selon vos préférences de travail :
 - Une règle de timecode graduée (ex: `00:00`, `00:10`, `00:20`...) surmonte l'ensemble des pistes avec un curseur triangulaire violet.
 - **Scrubbing instantané** : Cliquez ou glissez votre curseur de souris n'importe où sur la règle ou directement sur la piste vidéo pour parcourir fluidement toute votre vidéo en direct sans à-coups.
 
-### B. Les 6 Pistes de Montage & Chronologie Interactive Spatiale
+### C. 🎛️ Potard Horizontal d'Échelle Temporelle (Fader Studio Pro)
+- **Zoom continu de 1.0x à 8.0x** : Ajustez la largeur de la frise chronologique selon la précision requise. À `1.0x`, le projet tient dans la fenêtre ; à `8.0x`, chaque seconde s'étire sur 800% pour une découpe chirurgicale.
+- **Boutons pas-à-pas** : Cliquez sur `-` ou `+` pour ajuster l'échelle progressivement.
+- **Raccourci Molette** : Maintenez **`Ctrl`** et faites défiler la molette de votre souris sur la frise pour zoomer et dézoomer sans quitter la souris.
+- **Réinitialisation en 1 Clic** : Double-cliquez sur le fader ou cliquez sur le badge numérique (ex: `2.4x`) pour revenir instantanément à `1.0x`.
+- **Règle Adaptative & Défilement Unifié** : Les graduations de la règle s'affinent automatiquement (secondes, dixièmes) et toutes les pistes défilent ensemble, avec ancrage fixe des en-têtes de pistes à gauche (*sticky headers*).
+
+### D. 🎚️ Mixage Audio Multi-Pistes & Curseurs de Volume Indépendants
+- **Potentiomètre de Volume par Clip (0% à 100%)** : Chaque clip sur la Piste 1 ou la Piste 2 dispose d'un curseur de volume fin et d'un bouton Muet instantané.
+- **Équilibrage Voix / B-Roll** : Si vous superposez un plan B-Roll (Piste 2) sur votre capture d'écran (Piste 1), les deux sons jouent ensemble selon vos réglages de volume, vous permettant d'entendre votre voix tout en dosant le micro d'ambiance de la caméra 2.
+- **Nœud de Gain Web Audio à l'Export** : Le mixage audio appliqué dans le studio est fidèlement répercuté dans le rendu vidéo final (MP4 et WebM) via un pipeline `GainNode` dédié.
+
+### E. Les Pistes de Montage & Chronologie Interactive Spatiale
 L'éditeur multi-pistes place désormais la piste vidéo en haut comme référence maîtresse, avec les pistes secondaires calées sur la durée totale du projet :
 - **Piste 1 (🎬 Vidéos, Diapositives Titres & Images Plein Écran)** :
   - **Clips Vidéos** : Enchaînement de vos captures avec raccords (Trim), vitesse variable (jusqu'à 8x) et transitions fluides (Cut, Fondu enchaîné, Fondu au noir, Glissement).
@@ -449,7 +463,37 @@ Grâce au modèle d'intelligence artificielle léger embarqué **Google MediaPip
 
 ---
 
-## 📁 19. Organisation de la Bibliothèque Locale (Projets & Filtres Médias)
+## 📹 19. Caméra Secondaire B-Roll & Cadrage en Direct (Iriun Webcam / USB)
+
+OpenPeek prend en charge nativement une **deuxième caméra** pendant votre capture d'écran, particulièrement optimisée pour l'application gratuite **Iriun Webcam** (transformant votre smartphone en webcam HD sans fil via Wi-Fi ou USB) ou toute webcam USB externe :
+
+### A. Pourquoi utiliser une Caméra Secondaire B-Roll ?
+- **Démonstrations matérielles** : Filmez un circuit électronique, une feuille de papier, un dessin manuel, un livre ou un produit physique pendant que vous commentez votre écran.
+- **Plans de coupe dynamiques (B-Roll)** : Cassez la monotonie d'un enregistrement d'écran en insérant des prises de vue réelles en plein écran.
+
+### B. Configuration dans les Paramètres
+1. Rendez-vous dans **Paramètres > Caméra**.
+2. Dans la carte **Caméra Secondaire B-Roll**, cochez **Activer la Caméra Secondaire**.
+3. Sélectionnez votre caméra (OpenPeek détecte et sélectionne automatiquement **Iriun Webcam** dès qu'elle est connectée).
+4. Vérifiez le cadrage dans l'aperçu vidéo en direct.
+5. Optionnellement, cochez **Enregistrer l'audio de la caméra 2** et choisissez votre raccourci de déclenchement (**`F10`** par défaut ou **`Alt + B`**).
+
+### C. Prise de Vue & Cadrage en Direct
+- Pendant l'enregistrement de l'écran, appuyez sur **`F10`** (ou cliquez sur le bouton rouge `📹 Caméra B-Roll` de la barre d'outils) pour lancer un plan de coupe.
+- **Fenêtre Flottante PiP de Cadrage** : Une petite fenêtre de retour vidéo s'affiche immédiatement en bas à droite de votre écran. Elle vous permet de vérifier en temps réel que vos mains ou votre document sont bien cadrés.
+- **Zéro pollution d'écran** : Cette fenêtre flottante est un overlay d'interface purement virtuel pour vos yeux ; elle **n'apparaît JAMAIS dans la capture vidéo enregistrée** de votre écran principal.
+- Réappuyez sur **`F10`** pour clore le plan B-roll et revenir à l'écran.
+
+### D. Montage Automatique sur la Piste V2
+- Dès que vous arrêtez la capture d'écran, OpenPeek découpe automatiquement vos séquences B-roll et génère un projet de montage multi-pistes :
+  - **Piste V1** : Votre capture d'écran principale.
+  - **Piste V2** : Vos plans de caméra secondaire placés automatiquement à leurs **timecodes exacts de tournage** (`startTime`).
+- Sur la Piste V2, ces clips s'affichent automatiquement **en plein écran au-dessus de la capture d'écran**, avec transitions douces.
+- Utilisez les curseurs de volume pour ajuster le niveau sonore entre votre micro de bureau (Piste 1) et le micro de votre smartphone/caméra 2 (Piste 2).
+
+---
+
+## 📁 20. Organisation de la Bibliothèque Locale (Projets & Filtres Médias)
 
 La **Bibliothèque locale** d'OpenPeek a été repensée pour vous offrir un espace de travail ordonné :
 
@@ -460,7 +504,7 @@ La **Bibliothèque locale** d'OpenPeek a été repensée pour vous offrir un esp
 
 ---
 
-## 🛡️ 20. Confidentialité & Données Locales
+## 🛡️ 21. Confidentialité & Données Locales
 
 - **Zéro Télémétrie, Zéro Tracking** : Vos captures d'écran, vidéos, flux audio, webcam et scripts ne quittent **jamais** votre ordinateur.
 - **Stockage Local** : Toutes les vidéos, projets et scripts sont stockés localement dans la base de données interne de votre navigateur/PC (`IndexedDB`).
@@ -468,7 +512,7 @@ La **Bibliothèque locale** d'OpenPeek a été repensée pour vous offrir un esp
 
 ---
 
-## 🖥️ 21. Spécifications & Prérequis Matériels (GPU, CPU, RAM)
+## 🖥️ 22. Spécifications & Prérequis Matériels (GPU, CPU, RAM)
 
 Pour connaître en détail les exigences matérielles, le rôle de la carte graphique et les performances attendues selon vos résolutions cibles (1080p 30/60 fps, 4K, multi-écrans) :
 

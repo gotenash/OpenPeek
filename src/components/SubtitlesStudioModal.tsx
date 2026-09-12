@@ -276,7 +276,8 @@ export function SubtitlesStudioModal({ video, onClose, onSavedToLibrary }: Subti
           setVideoDuration(prev => Math.max(prev, maxCueEnd));
         }
       }
-    } catch {
+    } catch (err) {
+      console.error('[SubtitlesStudio] Speech segment detection failed:', err);
       alert("Erreur lors de l'analyse vocale.");
     } finally {
       setIsTranscribing(false);
@@ -302,7 +303,8 @@ export function SubtitlesStudioModal({ video, onClose, onSavedToLibrary }: Subti
           setVideoDuration(prev => Math.max(prev, maxCueEnd));
         }
       }
-    } catch {
+    } catch (err) {
+      console.error('[SubtitlesStudio] Local video transcription failed:', err);
       alert("Erreur lors de la transcription locale.");
     } finally {
       setIsTranscribing(false);
@@ -520,7 +522,8 @@ export function SubtitlesStudioModal({ video, onClose, onSavedToLibrary }: Subti
       });
       setSavedSuccess(true);
       onSavedToLibrary?.();
-    } catch {
+    } catch (err) {
+      console.error('[SubtitlesStudio] Error saving to library:', err);
       alert("Erreur lors de la sauvegarde.");
     }
   };

@@ -435,7 +435,8 @@ export async function getAccurateVideoDuration(videoEl: HTMLVideoElement, fallba
     videoEl.addEventListener('seeked', onSeeked, { once: true });
     try {
       videoEl.currentTime = 1e101;
-    } catch {
+    } catch (err) {
+      console.warn('[AutoRedact] Failed to set video currentTime for duration probe:', err);
       clearTimeout(timeout);
       finish();
     }
@@ -541,7 +542,11 @@ export async function renderRedactedVideo(
         if (abortSignal?.aborted) {
           cancelAnimationFrame(animId);
           video.pause();
-          try { recorder.stop(); } catch {}
+          try {
+            if (recorder.state !== 'inactive') recorder.stop();
+          } catch (err) {
+            console.debug('[AutoRedact] Error stopping recorder on abort:', err);
+          }
           reject(new DOMException("Rendu annulé", "AbortError"));
           return;
         }
@@ -558,7 +563,11 @@ export async function renderRedactedVideo(
         if (video.ended || effectiveTime >= duration || elapsedVirtualTime >= duration + 0.5) {
           cancelAnimationFrame(animId);
           video.pause();
-          try { recorder.stop(); } catch {}
+          try {
+            if (recorder.state !== 'inactive') recorder.stop();
+          } catch (err) {
+            console.debug('[AutoRedact] Error stopping recorder at end of stream:', err);
+          }
           return;
         }
 

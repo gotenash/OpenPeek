@@ -19,6 +19,7 @@ import {
   ScrollText
 } from 'lucide-react';
 import './App.css';
+import { APP_VERSION } from './version.ts';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -136,6 +137,10 @@ function MainApp() {
     autoZoomDuration: 2.8,
     selectedMicId: '',
     selectedCamId: '',
+    enableSecondaryCam: false,
+    selectedSecondaryCamId: '',
+    secondaryCamAudio: true,
+    secondaryCamShortcut: 'F10',
     captureSourcePreference: 'screen',
     zoomSoundFeedback: true,
     zoomToastFeedback: true,
@@ -417,7 +422,7 @@ function MainApp() {
           </a>
 
           <div className="version-info">
-            OpenPeek v1.2.0 • Open Source
+            OpenPeek v{APP_VERSION} • Open Source
           </div>
         </div>
       </aside>

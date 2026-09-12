@@ -158,6 +158,18 @@
 - **Timeline Track 5**: Place logos permanently as watermarks or schedule timed on-screen appearances.
 - **Visual Studio Modal**: Live 16:9 canvas preview, 5 quick position presets (*Top-Right*, *Top-Left*, *Center*, etc.) or free X/Y coordinates, scale slider (5% to 50%), opacity (10% to 100%), drop shadow, and rounded corners.
 
+### 📹 18. Secondary Camera B-Roll (Iriun Webcam / USB) & Track 2 Studio
+- **Smartphone & Secondary Webcam Integration**: Connect your phone via **Iriun Webcam** (Wi-Fi or USB) or a secondary USB camera to film physical objects, documents, or cutaway shots.
+- **Live Framing PiP Window (Overlay)**: A live framing card appears on the bottom-right of your screen while recording with the secondary camera, letting you position your subject perfectly. **Zero Screen Pollution**: The PiP is an application DOM overlay and is never recorded into your primary screen canvas capture.
+- **Hotkeys & Live Recording Trigger**: Hit **`F10`** or **`Alt + B`** anytime during recording (or click the live glowing toolbar button) to trigger or finish B-roll segments.
+- **Automatic Fullscreen Placement on Track 2 (V2)**: Secondary camera clips are automatically cut, saved, and inserted onto **Track 2** of the Video Editor Studio at their exact timecodes, playing fullscreen above Track 1 with smooth transitions.
+
+### 🎛️ 19. Timeline Scale Potentiometer & Multi-Track Audio Mixing
+- **Console Studio Potentiometer (Horizontal Fader)**: Continuously zoom the timeline scale from **`1.0x`** to **`8.0x`** for sample-accurate cuts and alignment. Includes stepped `+` / `-` buttons, `Ctrl + Mouse Wheel` support, and instant double-click reset.
+- **Adaptive Master Timeline Ruler**: Ruler ticks dynamically adjust to fractions of a second at high zoom levels, with synchronized multi-track scrolling and sticky track headers.
+- **Per-Clip Audio Volume Sliders (0% - 100%)**: Independently control the audio balance of Track 1 (Screen mic) and Track 2 (B-Roll camera audio) with 1-click mute buttons.
+- **Accurate Web Audio Export**: Integrated `GainNode` pipeline guarantees your exported MP4 and WebM videos reflect your exact studio volume mix.
+
 ---
 
 ## 🤖 AI Services & API Keys Guide
@@ -182,7 +194,8 @@
 | **`F7`** or **`Alt + P`** | **Pause / Resume** | Pauses or resumes the ongoing recording |
 | **`F9`** or **`Alt + Z`** | **Dynamic Zoom** | Zooms 2x centered on the current mouse position with audio feedback |
 | **`F8`** or **`Alt + D`** | **Freeze & Draw** | Freezes screen and opens drawing overlay |
-| **`F10`** or **`Alt + C`** | **Clear Drawings** | Clears all marker strokes on screen |
+| **`F10`** or **`Alt + B`** | **B-Roll Camera (V2)** | Starts or stops recording secondary camera (Iriun Webcam) to Track 2 |
+| **`Alt + C`** | **Clear Drawings** | Clears all marker strokes on screen |
 | **`Escape`** | **Exit Drawing** | Unfreezes screen and restores interactive control immediately |
 
 ---
@@ -360,6 +373,18 @@ npm run tauri build
 - **Piste 5 sur la Timeline** : Intégrez votre logo en filigrane permanent ou sur des intervalles temporels choisis.
 - **Boîte de Réglages Studio** : Moniteur de prévisualisation 16:9 en direct, 5 présélections de position (*Haut Droite*, *Haut Gauche*, *Centre*, etc.) ou coordonnées libres X/Y, échelle (5% à 50%), opacité (10% à 100%), ombre portée et coins arrondis.
 
+### 📹 18. Caméra Secondaire B-Roll (Iriun Webcam / USB) & Incrustation Piste V2
+- **Intégration Smartphone & Webcam Déportée** : Connectez votre smartphone via **Iriun Webcam** (en Wi-Fi ou câble USB) ou une deuxième caméra USB pour filmer des démonstrations manuelles, des documents ou des objets.
+- **Fenêtre Flottante de Cadrage PiP (Overlay)** : Un retour visuel en direct s'affiche en bas à droite de votre écran pendant la prise de vue pour cadrer parfaitement sans quitter vos yeux de la scène. **Zéro pollution d'écran** : Ce retour est un calque d'interface et n'est jamais incrusté dans la capture de votre écran principal.
+- **Déclenchement Temps Réel & Raccourcis** : Appuyez sur **`F10`** ou **`Alt + B`** (ou sur le bouton rougeoyant de la barre d'outils) pour démarrer et clore vos plans de coupe à la volée.
+- **Placement Automatique Plein Écran sur la Piste V2** : Vos séquences B-roll sont automatiquement découpées, sauvegardées et insérées sur la **Piste V2** du Studio à leurs timecodes exacts, avec superposition plein écran naturelle au-dessus de la capture d'écran.
+
+### 🎛️ 19. Potard d'Échelle Temporelle & Mixage Audio Multi-Pistes
+- **Potentiomètre Console Studio (Fader Horizontal)** : Zoomez en continu de **`1.0x`** à **`8.0x`** sur la frise chronologique pour un découpage chirurgical à l'image près. Boutons pas-à-pas `+` / `-`, zoom molette `Ctrl + Molette`, et double-clic de réinitialisation.
+- **Règle Chronologique Adaptative** : Les graduations s'affinent automatiquement (secondes, dixièmes de seconde) avec défilement synchronisé de toutes les pistes et ancrage fixe des en-têtes à gauche (*sticky headers*).
+- **Curseurs de Volume Audio par Clip (0% à 100%)** : Équilibrez le son de la voix de capture (Piste 1) et l'ambiance sonore de la caméra secondaire (Piste 2) avec boutons muet rapides.
+- **Export Web Audio Haute Précision** : Nœud de gain Web Audio (`GainNode`) répercutant fidèlement le mixage personnalisé dans vos fichiers MP4 et WebM exportés.
+
 ---
 
 ## 🤖 Guide des Clés API & Tarification IA
@@ -384,7 +409,8 @@ npm run tauri build
 | **`F7`** ou **`Alt + P`** | **Pause / Reprendre** | Met en pause ou reprend l'enregistrement en cours |
 | **`F9`** ou **`Alt + Z`** | **Zoom Dynamique** | Zoome à 200% centré sur la souris avec retours audio et visuels |
 | **`F8`** ou **`Alt + D`** | **Feutre & Dessin** | Fige l'écran et active la palette de dessin |
-| **`F10`** ou **`Alt + C`** | **Effacer les traits** | Supprime tous les dessins à l'écran |
+| **`F10`** ou **`Alt + B`** | **Caméra B-Roll (V2)** | Déclenche ou arrête la capture de la caméra 2 (Iriun Webcam) vers la Piste V2 |
+| **`Alt + C`** | **Effacer les traits** | Supprime tous les dessins à l'écran |
 | **`Échap`** | **Quitter le dessin** | Dégèle l'écran immédiatement et redonne le contrôle interactif |
 
 ---

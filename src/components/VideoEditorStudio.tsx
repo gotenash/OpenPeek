@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   getAllMedia,
   saveRecording, 
@@ -38,8 +38,9 @@ import {
   Film, Plus, Trash2, Play, Pause, 
   Download, Sparkles, Type, Layers, Check, X, Save, FolderOpen, 
   FileText, Upload, RefreshCw, Music, Volume2, VolumeX, Headphones, Mic,
-  Scissors, FastForward, ZoomIn, Crosshair, Image as ImageIcon,
-  ListTree, Bookmark, Copy, BookOpen, Maximize2, Minimize2
+  Scissors, FastForward, ZoomIn, ZoomOut, Crosshair, Image as ImageIcon,
+  ListTree, Bookmark, Copy, BookOpen, Maximize2, Minimize2,
+  Undo2, Redo2
 } from 'lucide-react';
 import { importSingleFile } from '../utils/mediaImporter';
 import { GifExportModal } from './GifExportModal';
@@ -82,10 +83,12 @@ interface SpatialTrackLaneProps {
     text: string;
     badgeColor: string;
   };
+  selectedItemId?: string | null;
+  onSelect?: (id: string) => void;
   onUpdateTiming: (id: string, startTime: number, duration: number) => void;
   onSeek: (time: number) => void;
   onEdit?: (id: string) => void;
-  onDelete: (id: string) => void;
+  onDelete?: (id: string) => void;
   onAddQuick?: () => void;
 }
 
@@ -98,10 +101,12 @@ function SpatialTrackLane({
   currentTime,
   emptyMessage,
   theme,
+  selectedItemId,
+  onSelect,
   onUpdateTiming,
   onSeek,
   onEdit,
-  onDelete,
+  onDelete: _onDelete,
   onAddQuick
 }: SpatialTrackLaneProps) {
   const laneRef = useRef<HTMLDivElement>(null);
@@ -149,7 +154,9 @@ function SpatialTrackLane({
 
     try {
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    } catch {}
+    } catch (err) {
+      console.debug('[Timeline] setPointerCapture ignored:', err);
+    }
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -185,7 +192,9 @@ function SpatialTrackLane({
     if (dragInfoRef.current) {
       try {
         (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-      } catch {}
+      } catch (err) {
+        console.debug('[Timeline] releasePointerCapture ignored:', err);
+      }
       dragInfoRef.current = null;
       setActiveDragId(null);
       setActiveFeedback(null);
@@ -203,7 +212,7 @@ function SpatialTrackLane({
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'rgba(0,0,0,0.25)', padding: '5px 8px', borderRadius: '5px' }}>
-      <div style={{ width: '160px', minWidth: '160px', maxWidth: '160px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: '8px', boxSizing: 'border-box' }}>
+      <div className="timeline-track-sticky-header" style={{ width: '160px', minWidth: '160px', maxWidth: '160px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: '8px', boxSizing: 'border-box' }}>
         <span style={{ fontSize: '10px', color: labelColor, fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {icon}
           {label} ({(items || []).length})
@@ -283,20 +292,26 @@ function SpatialTrackLane({
           const leftPercent = Math.max(0, Math.min(99, (sTime / safeDur) * 100));
           const widthPercent = Math.max(1.5, Math.min(100 - leftPercent, (dur / safeDur) * 100));
           const isDraggingThis = activeDragId === item.id;
+          const isSelected = selectedItemId === item.id;
 
           return (
             <div
               key={item.id}
-              className={`timeline-spatial-block ${isDraggingThis ? 'is-dragging' : ''}`}
+              className={`timeline-spatial-block ${isDraggingThis ? 'is-dragging' : ''} ${isSelected ? 'is-selected' : ''}`}
               style={{
                 left: `${leftPercent}%`,
                 width: `${widthPercent}%`,
                 minWidth: '55px',
-                backgroundColor: safeTheme.bg,
-                border: `1px solid ${safeTheme.border}`,
-                color: safeTheme.text
+                backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.35)' : safeTheme.bg,
+                border: isSelected ? '2px solid #38bdf8' : `1px solid ${safeTheme.border}`,
+                boxShadow: isSelected ? '0 0 10px rgba(56, 189, 248, 0.8)' : 'none',
+                color: safeTheme.text,
+                zIndex: isSelected ? 15 : 5
               }}
-              onPointerDown={(e) => handleStartDrag(e, item, 'move')}
+              onPointerDown={(e) => {
+                onSelect?.(item.id);
+                handleStartDrag(e, item, 'move');
+              }}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onClick={(e) => {
@@ -305,9 +320,16 @@ function SpatialTrackLane({
                   return;
                 }
                 e.stopPropagation();
+                onSelect?.(item.id);
                 onSeek(sTime);
               }}
-              title={`Glisser le bloc pour déplacer (${sTime.toFixed(1)}s). Étirer les bords pour allonger/réduire.`}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                if (onEdit) {
+                  onEdit(item.id);
+                }
+              }}
+              title={`Double-cliquez pour modifier (${sTime.toFixed(1)}s - ${(sTime + dur).toFixed(1)}s). Glissez pour déplacer. Touche Suppr pour supprimer.`}
             >
               {/* Left Stretch Handle */}
               <div
@@ -339,20 +361,20 @@ function SpatialTrackLane({
                 </span>
               </div>
 
-              {/* Actions: Edit & Delete */}
-              <div
-                className="timeline-block-actions"
-                style={{ position: 'relative', zIndex: 25, pointerEvents: 'auto' }}
-                onPointerDown={(e) => e.stopPropagation()}
-                onPointerUp={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {onEdit && (
+              {/* Actions: Edit */}
+              {onEdit && (
+                <div
+                  className="timeline-block-actions"
+                  style={{ position: 'relative', zIndex: 25, pointerEvents: 'auto' }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onPointerUp={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <button
                     type="button"
                     className="timeline-mini-btn"
-                    title="Modifier les options"
+                    title="Modifier les options (ou double-cliquez sur le bloc)"
                     onPointerDown={(e) => e.stopPropagation()}
                     onPointerUp={(e) => e.stopPropagation()}
                     onMouseDown={(e) => e.stopPropagation()}
@@ -363,23 +385,8 @@ function SpatialTrackLane({
                   >
                     ⚙️
                   </button>
-                )}
-                <button
-                  type="button"
-                  className="timeline-mini-btn"
-                  style={{ color: '#fb7185' }}
-                  title="Supprimer"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onPointerUp={(e) => e.stopPropagation()}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete(item.id);
-                  }}
-                >
-                  <X size={10} />
-                </button>
-              </div>
+                </div>
+              )}
 
               {/* Right Stretch Handle */}
               <div
@@ -1295,7 +1302,7 @@ export function VideoEditorStudio() {
   // Export format preference
   const [exportFormat, setExportFormat] = useState<'mp4' | 'webm'>('mp4');
 
-  const [project, setProject] = useState<EditorProject>({
+  const [_project, _setProject] = useState<EditorProject>({
     clips: [],
     titles: [],
     zooms: [],
@@ -1304,6 +1311,48 @@ export function VideoEditorStudio() {
     voiceovers: [],
     backgroundMusic: null
   });
+
+  const project = _project;
+  const projectRef = useRef<EditorProject>(_project);
+  projectRef.current = _project;
+
+  const undoStackRef = useRef<EditorProject[]>([]);
+  const redoStackRef = useRef<EditorProject[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const isUndoRedoRef = useRef<boolean>(false);
+  const lastHistoryPushTimeRef = useRef<number>(0);
+
+  const [selectedElement, setSelectedElement] = useState<{
+    type: 'clip' | 'voiceover' | 'title' | 'image' | 'zoom' | 'chapter';
+    id: string;
+  } | null>(null);
+
+  const setProject = useCallback((
+    updater: EditorProject | ((prev: EditorProject) => EditorProject),
+    forceHistory: boolean = false
+  ) => {
+    _setProject(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      if (next === prev) return prev;
+
+      if (!isUndoRedoRef.current) {
+        const now = Date.now();
+        if (forceHistory || now - lastHistoryPushTimeRef.current > 250) {
+          undoStackRef.current.push(prev);
+          if (undoStackRef.current.length > 50) {
+            undoStackRef.current.shift();
+          }
+          redoStackRef.current = [];
+          setCanUndo(true);
+          setCanRedo(false);
+          lastHistoryPushTimeRef.current = now;
+        }
+      }
+
+      return next;
+    });
+  }, []);
 
   const [currentTime, setCurrentTime] = useState(0);
   const currentTimeRef = useRef<number>(0);
@@ -1325,8 +1374,9 @@ export function VideoEditorStudio() {
     startTime: 0,
     duration: 3,
     style: 'lowerthird',
+    animation: 'slide-up',
     textColor: '#ffffff',
-    bgColor: 'rgba(15, 23, 42, 0.85)',
+    bgColor: 'rgba(15, 23, 42, 0.88)',
     fontSize: 28
   });
 
@@ -1402,15 +1452,33 @@ export function VideoEditorStudio() {
   // Video Picker Modal state
   const [isVideoPickerOpen, setIsVideoPickerOpen] = useState(false);
   const [videoInsertPosition, setVideoInsertPosition] = useState<'start' | 'current' | 'end'>('current');
+  const [targetTrackForInsert, setTargetTrackForInsert] = useState<1 | 2>(1);
 
   // Timeline View Mode: 'spatial' (piste alignée 1:1 avec la tête de lecture), 'filmstrip' (vignettes vidéo) or 'compact'
   const [timelineViewMode, setTimelineViewMode] = useState<'spatial' | 'filmstrip' | 'compact'>('spatial');
+  // Timeline Scale (Zoom temporel de 1x à 8x avec potard horizontal)
+  const [timelineScale, setTimelineScale] = useState<number>(1);
+  const timelineScrollContainerRef = useRef<HTMLDivElement>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const timelineRulerRef = useRef<HTMLDivElement>(null);
   const videoLaneRef = useRef<HTMLDivElement>(null);
+  const videoLane2Ref = useRef<HTMLDivElement>(null);
   const isScrubbingRulerRef = useRef<boolean>(false);
   const [clipFilmstrips, setClipFilmstrips] = useState<Record<string, { id: string; clipTime: number; timelineTime: number; formattedTime: string; dataUrl: string }[]>>({});
   const [generatingFilmstrips, setGeneratingFilmstrips] = useState<Record<string, boolean>>({});
+
+  // Clip dragging and trimming on Track 1 and Track 2
+  const clipDragInfoRef = useRef<{
+    clipId: string;
+    action: 'move' | 'resize-left' | 'resize-right';
+    startX: number;
+    initialStart: number;
+    initialDuration: number;
+    laneWidth: number;
+    speed: number;
+  } | null>(null);
+  const [activeClipDragId, setActiveClipDragId] = useState<string | null>(null);
+  const [clipDragFeedback, setClipDragFeedback] = useState<string | null>(null);
 
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const videoElementsRef = useRef<Map<string, HTMLVideoElement>>(new Map());
@@ -1539,7 +1607,7 @@ export function VideoEditorStudio() {
     }
   }, [project.clips]);
 
-  // Memoized cumulative start/end timeline offsets for each clip
+  // Memoized start/end timeline offsets for each clip (supports explicit startTime for V1/V2 overlaps)
   const clipTimelineOffsets = useMemo(() => {
     const offsets = new Map<string, { start: number; end: number; duration: number }>();
     let currentOffset = 0;
@@ -1548,15 +1616,54 @@ export function VideoEditorStudio() {
       const c = clips[i];
       const speed = c.playbackSpeed && c.playbackSpeed > 0 ? c.playbackSpeed : 1.0;
       const duration = Math.max(0.1, ((c.endTrim ?? 10) - (c.startTrim ?? 0)) / speed);
-      offsets.set(c.id, { start: currentOffset, end: currentOffset + duration, duration });
-      currentOffset += duration;
-      if (i < clips.length - 1 && c.transitionToNext !== 'none') {
+      const start = (typeof c.startTime === 'number' && !isNaN(c.startTime)) ? c.startTime : currentOffset;
+      offsets.set(c.id, { start, end: start + duration, duration });
+      currentOffset = Math.max(currentOffset + duration, start + duration);
+      if (i < clips.length - 1 && c.transitionToNext && c.transitionToNext !== 'none') {
         const transDur = Math.min(c.transitionDuration || 1, duration / 2);
         currentOffset -= transDur;
       }
     }
     return offsets;
   }, [project.clips]);
+
+  // Detected temporal overlaps between Track 1 (V1) and Track 2 (V2) clips
+  const detectedOverlaps = useMemo(() => {
+    const overlaps: {
+      id: string;
+      clip1: TimelineClip;
+      clip2: TimelineClip;
+      start: number;
+      end: number;
+      duration: number;
+    }[] = [];
+
+    const v1Clips = (project.clips || []).filter(c => c.track !== 2);
+    const v2Clips = (project.clips || []).filter(c => c.track === 2);
+
+    for (const c1 of v1Clips) {
+      const off1 = clipTimelineOffsets.get(c1.id);
+      if (!off1) continue;
+      for (const c2 of v2Clips) {
+        const off2 = clipTimelineOffsets.get(c2.id);
+        if (!off2) continue;
+        const oStart = Math.max(off1.start, off2.start);
+        const oEnd = Math.min(off1.end, off2.end);
+        const oDur = oEnd - oStart;
+        if (oDur > 0.05) {
+          overlaps.push({
+            id: `ovl_${c1.id}_${c2.id}`,
+            clip1: c1,
+            clip2: c2,
+            start: oStart,
+            end: oEnd,
+            duration: oDur
+          });
+        }
+      }
+    }
+    return overlaps;
+  }, [project.clips, clipTimelineOffsets]);
 
   // Generate visual filmstrip thumbnails when clips are added or modified
   useEffect(() => {
@@ -1724,8 +1831,9 @@ export function VideoEditorStudio() {
       startTime: Math.round(time * 10) / 10,
       duration: 3,
       style: 'lowerthird',
+      animation: 'slide-up',
       textColor: '#ffffff',
-      bgColor: 'rgba(15, 23, 42, 0.85)',
+      bgColor: 'rgba(15, 23, 42, 0.88)',
       fontSize: 28
     });
     setIsTitleModalOpen(true);
@@ -1902,6 +2010,9 @@ export function VideoEditorStudio() {
     try {
       const serializableClips = project.clips.map(c => ({
         id: c.id,
+        track: c.track || 1,
+        startTime: c.startTime,
+        volume: c.volume !== undefined ? c.volume : 1.0,
         videoId: c.video.id,
         videoTitle: c.video.title,
         startTrim: c.startTrim,
@@ -1965,6 +2076,9 @@ export function VideoEditorStudio() {
         if (item.type === 'slide') {
           loadedClips.push({
             id: item.id || `clip_${Date.now()}_${Math.random()}`,
+            track: item.track || 1,
+            startTime: item.startTime,
+            volume: item.volume !== undefined ? item.volume : 1.0,
             type: 'slide',
             slideContent: item.slideContent,
             video: {
@@ -1986,6 +2100,9 @@ export function VideoEditorStudio() {
           const matchingImg = libraryImages.find(img => img.id === item.videoId || img.title === item.videoTitle);
           loadedClips.push({
             id: item.id || `clip_${Date.now()}_${Math.random()}`,
+            track: item.track || 1,
+            startTime: item.startTime,
+            volume: item.volume !== undefined ? item.volume : 1.0,
             type: 'image',
             video: {
               id: item.videoId || (matchingImg ? matchingImg.id : `img_${Date.now()}`),
@@ -2007,6 +2124,9 @@ export function VideoEditorStudio() {
           if (matchingVideo) {
             loadedClips.push({
               id: item.id || `clip_${Date.now()}_${Math.random()}`,
+              track: item.track || 1,
+              startTime: item.startTime,
+              volume: item.volume !== undefined ? item.volume : 1.0,
               type: 'video',
               video: matchingVideo,
               startTrim: item.startTrim || 0,
@@ -2042,7 +2162,9 @@ export function VideoEditorStudio() {
             try {
               const res = await fetch(v.dataUrl);
               blob = await res.blob();
-            } catch {}
+            } catch (err) {
+              console.warn('[VideoEditor] Failed to fetch voiceover dataUrl:', err);
+            }
           }
           loadedVoiceovers.push({
             id: v.id,
@@ -2067,6 +2189,13 @@ export function VideoEditorStudio() {
         voiceovers: loadedVoiceovers,
         backgroundMusic: loadedBgMusic
       });
+
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+      setCanUndo(false);
+      setCanRedo(false);
+      setSelectedElement(null);
+      setSelectedClipId(null);
 
       setCurrentTime(0);
       setIsProjectListModalOpen(false);
@@ -2093,6 +2222,12 @@ export function VideoEditorStudio() {
     setProjectId(`proj_${Date.now()}`);
     setProjectName('Nouveau Projet');
     setProject({ clips: [], titles: [], zooms: [], images: [], chapters: [], voiceovers: [], backgroundMusic: null });
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+    setSelectedElement(null);
+    setSelectedClipId(null);
     setCurrentTime(0);
     isPlayingRef.current = false;
     setIsPlaying(false);
@@ -2102,6 +2237,9 @@ export function VideoEditorStudio() {
   const handleExportProjectFile = () => {
     const serializableClips = project.clips.map(c => ({
       id: c.id,
+      track: c.track || 1,
+      startTime: c.startTime,
+      volume: c.volume !== undefined ? c.volume : 1.0,
       videoId: c.video.id,
       videoTitle: c.video.title,
       startTrim: c.startTrim,
@@ -2170,6 +2308,9 @@ export function VideoEditorStudio() {
           if (item.type === 'slide') {
             loadedClips.push({
               id: item.id || `clip_${Date.now()}_${Math.random()}`,
+              track: item.track || 1,
+              startTime: item.startTime,
+              volume: item.volume !== undefined ? item.volume : 1.0,
               type: 'slide',
               slideContent: item.slideContent,
               video: {
@@ -2191,6 +2332,9 @@ export function VideoEditorStudio() {
             const matchingImg = libraryImages.find(img => img.id === item.videoId || img.title === item.videoTitle);
             loadedClips.push({
               id: item.id || `clip_${Date.now()}_${Math.random()}`,
+              track: item.track || 1,
+              startTime: item.startTime,
+              volume: item.volume !== undefined ? item.volume : 1.0,
               type: 'image',
               video: {
                 id: item.videoId || (matchingImg ? matchingImg.id : `img_${Date.now()}`),
@@ -2212,6 +2356,9 @@ export function VideoEditorStudio() {
             if (matchingVideo) {
               loadedClips.push({
                 id: item.id || `clip_${Date.now()}_${Math.random()}`,
+                track: item.track || 1,
+                startTime: item.startTime,
+                volume: item.volume !== undefined ? item.volume : 1.0,
                 type: 'video',
                 video: matchingVideo,
                 startTrim: item.startTrim || 0,
@@ -2245,7 +2392,9 @@ export function VideoEditorStudio() {
               try {
                 const res = await fetch(v.dataUrl);
                 blob = await res.blob();
-              } catch {}
+              } catch (err) {
+                console.warn('[VideoEditor] Failed to fetch voiceover dataUrl:', err);
+              }
             }
             loadedVoiceovers.push({
               id: v.id,
@@ -2270,6 +2419,13 @@ export function VideoEditorStudio() {
           voiceovers: loadedVoiceovers,
           backgroundMusic: loadedBgMusic
         });
+
+        undoStackRef.current = [];
+        redoStackRef.current = [];
+        setCanUndo(false);
+        setCanRedo(false);
+        setSelectedElement(null);
+        setSelectedClipId(null);
 
         setCurrentTime(0);
         setSaveSuccessMsg(`Fichier ${file.name} importé !`);
@@ -2379,11 +2535,13 @@ export function VideoEditorStudio() {
 
   // --- Clip Manipulation ---
 
-  const addClipToTimeline = (video: SavedVideo, insertPosition: 'start' | 'current' | 'end' = 'end') => {
+  const addClipToTimeline = (video: SavedVideo, insertPosition: 'start' | 'current' | 'end' = 'end', track?: 1 | 2) => {
     const newClipId = `clip_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const initialEndTrim = video.duration && video.duration > 0 ? video.duration : 10;
+    const assignedTrack = track || targetTrackForInsert || 1;
     const newClip: TimelineClip = {
       id: newClipId,
+      track: assignedTrack,
       video,
       startTrim: 0,
       endTrim: initialEndTrim,
@@ -2489,20 +2647,29 @@ export function VideoEditorStudio() {
   };
 
   const openEditSlideModal = (clip: TimelineClip) => {
-    if (!clip.slideContent) return;
     setEditingSlideClipId(clip.id);
+    setSelectedClipId(clip.id);
     setSlideModalMode('edit');
     const dur = Math.max(0.5, clip.endTrim - clip.startTrim);
+    const content = clip.slideContent || {
+      title: clip.video?.title || 'Diapositive Titre',
+      subtitle: '',
+      bgColor: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)',
+      textColor: '#ffffff',
+      subtextColor: '#94a3b8',
+      fontSize: 52,
+      align: 'center'
+    };
     setSlideForm({
-      title: clip.slideContent.title || 'Diapositive Titre',
-      subtitle: clip.slideContent.subtitle || '',
-      bgColor: clip.slideContent.bgColor || 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)',
-      textColor: clip.slideContent.textColor || '#ffffff',
-      subtextColor: clip.slideContent.subtextColor || '#94a3b8',
-      fontSize: clip.slideContent.fontSize || 52,
+      title: content.title || 'Diapositive Titre',
+      subtitle: content.subtitle || '',
+      bgColor: content.bgColor || 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)',
+      textColor: content.textColor || '#ffffff',
+      subtextColor: content.subtextColor || '#94a3b8',
+      fontSize: content.fontSize || 52,
       duration: dur,
-      align: clip.slideContent.align || 'center',
-      bgImageUrl: clip.slideContent.bgImageUrl || '',
+      align: content.align || 'center',
+      bgImageUrl: content.bgImageUrl || '',
       transitionToNext: clip.transitionToNext || 'crossfade'
     });
     setIsSlideModalOpen(true);
@@ -2551,11 +2718,13 @@ export function VideoEditorStudio() {
           return c;
         })
       }));
+      setSelectedClipId(editingSlideClipId);
     } else {
       // Add mode
       const newSlideClip: TimelineClip = {
         id: `slide_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         type: 'slide',
+        track: targetTrackForInsert || 1,
         slideContent,
         video: {
           id: `slide_vid_${Date.now()}`,
@@ -2595,6 +2764,11 @@ export function VideoEditorStudio() {
         }
         return { ...prev, clips };
       });
+
+      setSelectedClipId(newSlideClip.id);
+      if (activePos === 'start') {
+        handleSeek(0);
+      }
     }
 
     setIsSlideModalOpen(false);
@@ -2609,6 +2783,7 @@ export function VideoEditorStudio() {
     const newImageClip: TimelineClip = {
       id: newClipId,
       type: 'image',
+      track: targetTrackForInsert || 1,
       video: {
         id: media.id,
         title: media.title || 'Diapositive Image',
@@ -2660,6 +2835,11 @@ export function VideoEditorStudio() {
       return { ...prev, clips };
     });
 
+    setSelectedClipId(newClipId);
+    if (insertPosition === 'start') {
+      handleSeek(0);
+    }
+
     setIsImageSlidePickerOpen(false);
     setTimeout(() => {
       if (!isPlayingRef.current) renderStaticPreviewAt(currentTimeRef.current);
@@ -2687,6 +2867,9 @@ export function VideoEditorStudio() {
       ...prev,
       clips: prev.clips.filter((c) => c.id !== id)
     }));
+    if (selectedClipId === id) {
+      setSelectedClipId(null);
+    }
   };
 
   const moveClip = (index: number, direction: 'left' | 'right') => {
@@ -2722,6 +2905,63 @@ export function VideoEditorStudio() {
         showFastForwardBadge: playbackSpeed > 1
       } : c)
     }));
+  };
+
+  const updateClipVolume = (id: string, volume: number) => {
+    const clamped = Math.max(0, Math.min(1, Math.round(volume * 100) / 100));
+    setProject((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) => c.id === id ? {
+        ...c,
+        volume: clamped
+      } : c)
+    }));
+    const vEl = videoElementsRef.current.get(id);
+    if (vEl) {
+      vEl.volume = clamped;
+      vEl.muted = (clamped === 0);
+    }
+  };
+
+  const toggleClipTrack = (id: string, targetTrack?: 1 | 2) => {
+    setProject((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) => {
+        if (c.id === id) {
+          const newTrack = targetTrack ?? ((c.track === 2) ? 1 : 2);
+          return { ...c, track: newTrack };
+        }
+        return c;
+      })
+    }));
+  };
+
+  const updateClipTiming = (id: string, newStartTime: number, newDuration?: number) => {
+    const validStart = Math.max(0, Math.round(newStartTime * 10) / 10);
+    setProject((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) => {
+        if (c.id === id) {
+          const speed = c.playbackSpeed && c.playbackSpeed > 0 ? c.playbackSpeed : 1.0;
+          let updatedEndTrim = c.endTrim;
+          if (typeof newDuration === 'number' && newDuration > 0) {
+            const rawDur = Math.max(0.2, Math.round(newDuration * 10) / 10);
+            const originalMax = c.video?.duration && c.video.duration > 0 ? c.video.duration : 9999;
+            const targetEndTrim = (c.startTrim ?? 0) + (rawDur * speed);
+            updatedEndTrim = Math.min(originalMax, targetEndTrim);
+          }
+          return {
+            ...c,
+            startTime: validStart,
+            endTrim: updatedEndTrim
+          };
+        }
+        return c;
+      })
+    }));
+    if (!isPlayingRef.current) {
+      renderStaticPreviewAt(currentTimeRef.current);
+    }
   };
 
   const splitAndFastForward = (clipId: string, speed: number = 4) => {
@@ -2835,7 +3075,10 @@ export function VideoEditorStudio() {
   };
 
   const openEditTitleModal = (title: TimelineTitle) => {
-    setTitleForm({ ...title });
+    setTitleForm({
+      ...title,
+      animation: title.animation || 'slide-up'
+    });
     setIsTitleModalOpen(true);
   };
 
@@ -3257,7 +3500,9 @@ export function VideoEditorStudio() {
     if (voiceoverRecorderRef.current && voiceoverRecorderRef.current.state !== 'inactive') {
       try {
         voiceoverRecorderRef.current.stop();
-      } catch {}
+      } catch (err) {
+        console.debug('[VideoEditor] Error stopping voiceover recorder:', err);
+      }
     }
     voiceoverRecorderRef.current = null;
 
@@ -3390,20 +3635,61 @@ export function VideoEditorStudio() {
     }
   };
 
-  // Timeline Ruler graduation markers
+  // Dynamic Timeline Ruler graduation markers according to timelineScale
   const rulerTicks = useMemo(() => {
     if (totalDuration <= 0) return [];
-    const count = 10;
+    const baseCount = 10;
+    const targetCount = Math.max(baseCount, Math.round(baseCount * timelineScale));
+    const rawInterval = totalDuration / targetCount;
+    
+    // Pick clean, professional intervals for timeline rulers (seconds)
+    const niceIntervals = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+    const interval = niceIntervals.find(iv => iv >= rawInterval) || Math.ceil(rawInterval);
+    
     const ticks: { pct: number; label: string }[] = [];
-    for (let i = 0; i <= count; i++) {
-      const t = (i / count) * totalDuration;
-      ticks.push({
-        pct: (i / count) * 100,
-        label: formatTime(t)
-      });
+    for (let t = 0; t <= totalDuration + 0.0001; t += interval) {
+      const pct = (t / totalDuration) * 100;
+      if (pct > 100.1) break;
+      const label = interval < 1
+        ? `${formatTime(t)}.${Math.floor((t % 1) * 10)}`
+        : formatTime(t);
+      ticks.push({ pct: Math.min(100, pct), label });
     }
     return ticks;
-  }, [totalDuration]);
+  }, [totalDuration, timelineScale]);
+
+  // Support Ctrl + MouseWheel to adjust timelineScale smoothly
+  useEffect(() => {
+    const el = timelineScrollContainerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.15 : 0.87;
+        setTimelineScale(prev => Math.max(1, Math.min(8, Math.round(prev * factor * 10) / 10)));
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Auto-scroll timeline to keep playhead in view during playback or seeking when zoomed
+  useEffect(() => {
+    if (timelineScale <= 1 || totalDuration <= 0 || !timelineScrollContainerRef.current) return;
+    const container = timelineScrollContainerRef.current;
+    const playheadPct = currentTime / totalDuration;
+    const scrollWidth = container.scrollWidth;
+    const clientWidth = container.clientWidth;
+    const playheadX = 160 + playheadPct * Math.max(0, scrollWidth - 160);
+    const visibleLeft = container.scrollLeft;
+    const visibleRight = container.scrollLeft + clientWidth;
+    
+    if (playheadX > visibleRight - 40) {
+      container.scrollLeft = playheadX - clientWidth / 2;
+    } else if (playheadX < visibleLeft + 170 && container.scrollLeft > 0) {
+      container.scrollLeft = Math.max(0, playheadX - 170);
+    }
+  }, [currentTime, timelineScale, totalDuration]);
 
   const handleRulerSeek = (clientX: number) => {
     if (!timelineRulerRef.current || totalDuration <= 0) return;
@@ -3411,6 +3697,13 @@ export function VideoEditorStudio() {
     const clickX = Math.max(0, Math.min(rect.width, clientX - rect.left));
     const seekTime = (clickX / rect.width) * totalDuration;
     handleSeek(seekTime);
+    const clipAtPos = (project.clips || []).find((c) => {
+      const off = clipTimelineOffsets.get(c.id);
+      return off && seekTime >= off.start && seekTime <= off.end;
+    });
+    if (clipAtPos) {
+      setSelectedClipId(clipAtPos.id);
+    }
   };
 
   const handleRulerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -3429,28 +3722,117 @@ export function VideoEditorStudio() {
     isScrubbingRulerRef.current = false;
   };
 
-  const handleVideoLaneSeek = (clientX: number) => {
-    if (!videoLaneRef.current || totalDuration <= 0) return;
-    const rect = videoLaneRef.current.getBoundingClientRect();
+  const handleVideoLaneSeek = (clientX: number, targetLane?: HTMLElement | null) => {
+    const lane = targetLane || videoLaneRef.current || videoLane2Ref.current;
+    if (!lane || totalDuration <= 0) return;
+    const rect = lane.getBoundingClientRect();
     const clickX = Math.max(0, Math.min(rect.width, clientX - rect.left));
     const seekTime = (clickX / rect.width) * totalDuration;
     handleSeek(seekTime);
+    const clipAtPos = (project.clips || []).find((c) => {
+      const off = clipTimelineOffsets.get(c.id);
+      return off && seekTime >= off.start && seekTime <= off.end;
+    });
+    if (clipAtPos) {
+      setSelectedClipId(clipAtPos.id);
+      setSelectedElement({ type: 'clip', id: clipAtPos.id });
+    }
   };
 
   const handleVideoLanePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (totalDuration <= 0) return;
     isScrubbingRulerRef.current = true;
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-    handleVideoLaneSeek(e.clientX);
+    handleVideoLaneSeek(e.clientX, e.currentTarget);
   };
 
   const handleVideoLanePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isScrubbingRulerRef.current) return;
-    handleVideoLaneSeek(e.clientX);
+    handleVideoLaneSeek(e.clientX, e.currentTarget);
   };
 
   const handleVideoLanePointerUp = () => {
     isScrubbingRulerRef.current = false;
+  };
+
+  const handleStartClipDrag = (
+    e: React.PointerEvent<HTMLDivElement>,
+    clipId: string,
+    action: 'move' | 'resize-left' | 'resize-right',
+    laneEl: HTMLDivElement | null
+  ) => {
+    const target = e.target as HTMLElement | null;
+    if (target && target.closest('button')) {
+      return;
+    }
+    e.stopPropagation();
+    if (!laneEl || totalDuration <= 0) return;
+    const laneRect = laneEl.getBoundingClientRect();
+    const clip = (project.clips || []).find(c => c.id === clipId);
+    if (!clip) return;
+    const off = clipTimelineOffsets.get(clipId) || { start: 0, end: 10, duration: 10 };
+    const speed = clip.playbackSpeed && clip.playbackSpeed > 0 ? clip.playbackSpeed : 1.0;
+
+    clipDragInfoRef.current = {
+      clipId,
+      action,
+      startX: e.clientX,
+      initialStart: off.start,
+      initialDuration: off.duration,
+      laneWidth: Math.max(10, laneRect.width),
+      speed
+    };
+
+    setSelectedClipId(clipId);
+    setSelectedElement({ type: 'clip', id: clipId });
+    setActiveClipDragId(clipId);
+    setClipDragFeedback(`${off.start.toFixed(1)}s → ${off.end.toFixed(1)}s (${off.duration.toFixed(1)}s)`);
+
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch (err) {
+      console.debug('[Timeline] setPointerCapture ignored on clip:', err);
+    }
+  };
+
+  const handleClipPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = clipDragInfoRef.current;
+    if (!drag || totalDuration <= 0) return;
+
+    const dx = e.clientX - drag.startX;
+    const dt = (dx / drag.laneWidth) * totalDuration;
+
+    if (drag.action === 'move') {
+      const newStart = Math.max(0, Math.round((drag.initialStart + dt) * 10) / 10);
+      updateClipTiming(drag.clipId, newStart, drag.initialDuration);
+      handleSeek(newStart);
+      setClipDragFeedback(`Position: ${newStart.toFixed(1)}s (Fin: ${(newStart + drag.initialDuration).toFixed(1)}s)`);
+    } else if (drag.action === 'resize-right') {
+      const newDur = Math.max(0.5, Math.round((drag.initialDuration + dt) * 10) / 10);
+      updateClipTiming(drag.clipId, drag.initialStart, newDur);
+      handleSeek(drag.initialStart + newDur);
+      setClipDragFeedback(`Durée: ${newDur.toFixed(1)}s (Fin: ${(drag.initialStart + newDur).toFixed(1)}s)`);
+    } else if (drag.action === 'resize-left') {
+      const maxStart = drag.initialStart + drag.initialDuration - 0.5;
+      const newStart = Math.max(0, Math.min(maxStart, Math.round((drag.initialStart + dt) * 10) / 10));
+      const newDur = Math.max(0.5, Math.round((drag.initialDuration - (newStart - drag.initialStart)) * 10) / 10);
+      updateClipTiming(drag.clipId, newStart, newDur);
+      handleSeek(newStart);
+      setClipDragFeedback(`Position: ${newStart.toFixed(1)}s | Durée: ${newDur.toFixed(1)}s`);
+    }
+  };
+
+  const handleClipPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (clipDragInfoRef.current) {
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch (err) {
+        console.debug('[Timeline] releasePointerCapture ignored on clip:', err);
+      }
+      clipDragInfoRef.current = null;
+      setActiveClipDragId(null);
+      setClipDragFeedback(null);
+    }
   };
 
   // Currently inspected or active clip on Track 1
@@ -3471,7 +3853,9 @@ export function VideoEditorStudio() {
     setPreviewSize(size);
     try {
       localStorage.setItem('openpeek_editor_preview_size', size);
-    } catch {}
+    } catch (err) {
+      console.warn('[VideoEditor] Failed to save preview size to localStorage:', err);
+    }
   };
 
   const toggleFullscreen = () => {
@@ -3479,18 +3863,28 @@ export function VideoEditorStudio() {
       setIsFullscreen(true);
       try {
         if (previewContainerRef.current && previewContainerRef.current.requestFullscreen) {
-          previewContainerRef.current.requestFullscreen().catch(() => {});
+          previewContainerRef.current.requestFullscreen().catch((err) => {
+            console.debug('[VideoEditor] Container requestFullscreen error:', err);
+          });
         } else if (document.documentElement.requestFullscreen) {
-          document.documentElement.requestFullscreen().catch(() => {});
+          document.documentElement.requestFullscreen().catch((err) => {
+            console.debug('[VideoEditor] Document requestFullscreen error:', err);
+          });
         }
-      } catch {}
+      } catch (err) {
+        console.debug('[VideoEditor] Fullscreen request error:', err);
+      }
     } else {
       setIsFullscreen(false);
       try {
         if (document.fullscreenElement) {
-          document.exitFullscreen().catch(() => {});
+          document.exitFullscreen().catch((err) => {
+            console.debug('[VideoEditor] exitFullscreen error:', err);
+          });
         }
-      } catch {}
+      } catch (err) {
+        console.debug('[VideoEditor] Exit fullscreen error:', err);
+      }
     }
   };
 
@@ -3505,36 +3899,380 @@ export function VideoEditorStudio() {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, [isFullscreen]);
 
-  // Keyboard navigation & shortcuts (F for fullscreen, Space, Left/Right seek)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+  const handleUndo = useCallback(() => {
+    if (undoStackRef.current.length === 0) return;
+    const previous = undoStackRef.current.pop();
+    if (!previous) return;
+
+    redoStackRef.current.push(projectRef.current);
+    if (redoStackRef.current.length > 50) {
+      redoStackRef.current.shift();
+    }
+
+    setCanUndo(undoStackRef.current.length > 0);
+    setCanRedo(true);
+
+    // Verify if selectedElement still exists
+    if (selectedElement) {
+      const exists =
+        (selectedElement.type === 'clip' && (previous.clips || []).some(c => c.id === selectedElement.id)) ||
+        (selectedElement.type === 'voiceover' && (previous.voiceovers || []).some(v => v.id === selectedElement.id)) ||
+        (selectedElement.type === 'title' && (previous.titles || []).some(t => t.id === selectedElement.id)) ||
+        (selectedElement.type === 'image' && (previous.images || []).some(i => i.id === selectedElement.id)) ||
+        (selectedElement.type === 'zoom' && (previous.zooms || []).some(z => z.id === selectedElement.id)) ||
+        (selectedElement.type === 'chapter' && (previous.chapters || []).some(c => c.id === selectedElement.id));
+      if (!exists) {
+        setSelectedElement(null);
+        setSelectedClipId(null);
+      }
+    }
+
+    isUndoRedoRef.current = true;
+    _setProject(previous);
+    setTimeout(() => {
+      isUndoRedoRef.current = false;
+      if (!isPlayingRef.current) {
+        renderStaticPreviewAt(currentTimeRef.current);
+      }
+    }, 30);
+  }, [selectedElement]);
+
+  const handleRedo = useCallback(() => {
+    if (redoStackRef.current.length === 0) return;
+    const next = redoStackRef.current.pop();
+    if (!next) return;
+
+    undoStackRef.current.push(projectRef.current);
+    if (undoStackRef.current.length > 50) {
+      undoStackRef.current.shift();
+    }
+
+    setCanUndo(true);
+    setCanRedo(redoStackRef.current.length > 0);
+
+    isUndoRedoRef.current = true;
+    _setProject(next);
+    setTimeout(() => {
+      isUndoRedoRef.current = false;
+      if (!isPlayingRef.current) {
+        renderStaticPreviewAt(currentTimeRef.current);
+      }
+    }, 30);
+  }, []);
+
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedElement) {
+      if (selectedElement.type === 'clip') {
+        removeClipFromTimeline(selectedElement.id);
+      } else if (selectedElement.type === 'voiceover') {
+        removeVoiceover(selectedElement.id);
+      } else if (selectedElement.type === 'title') {
+        removeTitle(selectedElement.id);
+      } else if (selectedElement.type === 'image') {
+        removeImageOverlay(selectedElement.id);
+      } else if (selectedElement.type === 'zoom') {
+        removeZoom(selectedElement.id);
+      } else if (selectedElement.type === 'chapter') {
+        handleRemoveChapter(selectedElement.id);
+      }
+      setSelectedElement(null);
+      setSelectedClipId(null);
+    } else if (selectedClipId) {
+      removeClipFromTimeline(selectedClipId);
+      setSelectedClipId(null);
+    }
+  }, [selectedElement, selectedClipId]);
+
+  // Note: keydown listeners and handleSplitAtPlayhead are declared below renderStaticPreviewAt
+
+
+  // Shared single-clip rendering helper for static preview, live playback, and export
+  const drawSingleClipToCanvas = (
+    ctx: CanvasRenderingContext2D,
+    clip: TimelineClip,
+    time: number,
+    offset: { start: number; end: number; duration: number },
+    canvasWidth: number,
+    canvasHeight: number,
+    videoElMap: Map<string, HTMLVideoElement>,
+    imgCacheMap: Map<string, HTMLImageElement>,
+    isPlayback: boolean
+  ) => {
+    const speed = clip.playbackSpeed && clip.playbackSpeed > 0 ? clip.playbackSpeed : 1.0;
+    if (clip.type === 'slide' && clip.slideContent) {
+      drawSlideClip(ctx, clip.slideContent, canvasWidth, canvasHeight);
+    } else if (clip.type === 'image') {
+      let imgEl = imgCacheMap.get(clip.id);
+      if (!imgEl && (clip.video?.thumbnail || (clip.video?.blob && clip.video.blob.size > 0))) {
+        imgEl = new Image();
+        imgEl.src = clip.video?.thumbnail || (clip.video?.blob ? URL.createObjectURL(clip.video.blob) : '');
+        imgCacheMap.set(clip.id, imgEl);
+      }
+      if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
+        drawImageClip(ctx, imgEl, canvasWidth, canvasHeight);
+      }
+    } else {
+      const videoEl = videoElMap.get(clip.id);
+      let frameDrawn = false;
+      if (videoEl) {
+        const targetClipTime = Math.max(0, Math.min(
+          videoEl.duration || 9999,
+          ((time - offset.start) * speed) + (clip.startTrim ?? 0)
+        ));
+        if (isPlayback) {
+          if (exportContainerRef.current && !exportContainerRef.current.contains(videoEl)) {
+            exportContainerRef.current.appendChild(videoEl);
+          }
+          videoEl.playbackRate = speed;
+          if (videoEl.paused) {
+            videoEl.currentTime = targetClipTime;
+            videoEl.play().catch(() => {});
+          }
+        } else {
+          if (Math.abs(videoEl.currentTime - targetClipTime) > 0.05) {
+            const onSeeked = () => {
+              videoEl.removeEventListener('seeked', onSeeked);
+              if (!isPlayingRef.current) renderStaticPreviewAt(currentTimeRef.current);
+            };
+            videoEl.addEventListener('seeked', onSeeked, { once: true });
+            videoEl.currentTime = targetClipTime;
+          }
+        }
+
+        if (videoEl.readyState >= 1) {
+          ctx.drawImage(videoEl, 0, 0, canvasWidth, canvasHeight);
+          if (speed > 1.0) {
+            drawFastForwardBadge(ctx, speed, canvasWidth, canvasHeight);
+          }
+          frameDrawn = true;
+        }
+      }
+
+      if (!frameDrawn && clip.video?.thumbnail) {
+        let thumbImg = imgCacheMap.get(`thumb_${clip.id}`);
+        if (!thumbImg) {
+          thumbImg = new Image();
+          thumbImg.onload = () => {
+            if (!isPlayingRef.current) renderStaticPreviewAt(currentTimeRef.current);
+          };
+          thumbImg.src = clip.video.thumbnail;
+          imgCacheMap.set(`thumb_${clip.id}`, thumbImg);
+        }
+        if (thumbImg && thumbImg.complete && thumbImg.naturalWidth > 0) {
+          ctx.drawImage(thumbImg, 0, 0, canvasWidth, canvasHeight);
+          if (speed > 1.0) {
+            drawFastForwardBadge(ctx, speed, canvasWidth, canvasHeight);
+          }
+        }
+      }
+    }
+  };
+
+  // Shared multi-clip compositor supporting Track 1 & Track 2 overlaps and transitions
+  const compositeActiveClipsToCanvas = (
+    ctx: CanvasRenderingContext2D,
+    time: number,
+    canvasWidth: number,
+    canvasHeight: number,
+    videoElMap: Map<string, HTMLVideoElement>,
+    imgCacheMap: Map<string, HTMLImageElement>,
+    isPlayback: boolean
+  ) => {
+    const active: { clip: TimelineClip; offset: { start: number; end: number; duration: number } }[] = [];
+    const clips = project.clips || [];
+    for (const c of clips) {
+      const off = clipTimelineOffsets.get(c.id);
+      if (off && time >= off.start && time <= off.end) {
+        active.push({ clip: c, offset: off });
+      }
+    }
+
+    if (isPlayback) {
+      videoElMap.forEach((v, id) => {
+        const isActive = active.some(a => a.clip.id === id);
+        if (!isActive && !v.paused) {
+          v.pause();
+          v.muted = true;
+        }
+      });
+    }
+
+    if (active.length === 0) return;
+
+    if (active.length === 1) {
+      const single = active[0];
+      const vEl = videoElMap.get(single.clip.id);
+      if (vEl && isPlayback) {
+        const cVol = single.clip.volume !== undefined ? single.clip.volume : 1.0;
+        vEl.muted = (cVol === 0);
+        vEl.volume = Math.max(0, Math.min(1, cVol));
+      }
+      drawSingleClipToCanvas(ctx, single.clip, time, single.offset, canvasWidth, canvasHeight, videoElMap, imgCacheMap, isPlayback);
+      return;
+    }
+
+    // Multiple clips active (overlap between Track 1 and Track 2, or sequential transition)
+    active.sort((a, b) => {
+      const trackA = a.clip.track ?? 1;
+      const trackB = b.clip.track ?? 1;
+      if (trackA !== trackB) return trackA - trackB;
+      return a.offset.start - b.offset.start;
+    });
+
+    const base = active[0];
+    const incoming = active[1];
+
+    const overlapStart = Math.max(base.offset.start, incoming.offset.start);
+    const overlapEnd = Math.min(base.offset.end, incoming.offset.end);
+    const overlapDur = Math.max(0.01, overlapEnd - overlapStart);
+    const progress = Math.max(0, Math.min(1, (time - overlapStart) / overlapDur));
+    const transType = base.clip.transitionToNext || 'crossfade';
+
+    if (isPlayback) {
+      const isMultiTrack = (base.clip.track ?? 1) !== (incoming.clip.track ?? 1);
+      const vBase = videoElMap.get(base.clip.id);
+      const baseVol = base.clip.volume !== undefined ? base.clip.volume : 1.0;
+      if (vBase) {
+        vBase.muted = (baseVol === 0);
+        vBase.volume = isMultiTrack ? baseVol : Math.max(0, Math.min(1, (1 - progress) * baseVol));
+      }
+      const vInc = videoElMap.get(incoming.clip.id);
+      const incVol = incoming.clip.volume !== undefined ? incoming.clip.volume : 1.0;
+      if (vInc) {
+        vInc.muted = (incVol === 0);
+        vInc.volume = isMultiTrack ? incVol : Math.max(0, Math.min(1, progress * incVol));
+      }
+    }
+
+    // 1. Draw Base Clip
+    ctx.save();
+    if (transType === 'fade-black') {
+      if (progress < 0.5) {
+        ctx.globalAlpha = Math.max(0, 1 - progress * 2);
+        drawSingleClipToCanvas(ctx, base.clip, time, base.offset, canvasWidth, canvasHeight, videoElMap, imgCacheMap, isPlayback);
+      } else {
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+      }
+    } else {
+      drawSingleClipToCanvas(ctx, base.clip, time, base.offset, canvasWidth, canvasHeight, videoElMap, imgCacheMap, isPlayback);
+    }
+    ctx.restore();
+
+    // 2. Draw Incoming Clip with transition
+    ctx.save();
+    if (transType === 'crossfade') {
+      ctx.globalAlpha = progress;
+      drawSingleClipToCanvas(ctx, incoming.clip, time, incoming.offset, canvasWidth, canvasHeight, videoElMap, imgCacheMap, isPlayback);
+    } else if (transType === 'fade-black') {
+      if (progress >= 0.5) {
+        ctx.globalAlpha = Math.max(0, (progress - 0.5) * 2);
+        drawSingleClipToCanvas(ctx, incoming.clip, time, incoming.offset, canvasWidth, canvasHeight, videoElMap, imgCacheMap, isPlayback);
+      }
+    } else if (transType === 'slide') {
+      const offX = (1.0 - progress) * canvasWidth;
+      ctx.translate(offX, 0);
+      drawSingleClipToCanvas(ctx, incoming.clip, time, incoming.offset, canvasWidth, canvasHeight, videoElMap, imgCacheMap, isPlayback);
+    } else {
+      // 'none' or cutaway
+      if (progress >= 0.5) {
+        drawSingleClipToCanvas(ctx, incoming.clip, time, incoming.offset, canvasWidth, canvasHeight, videoElMap, imgCacheMap, isPlayback);
+      }
+    }
+    ctx.restore();
+  };
+
+  const renderStaticPreviewAt = (time: number) => {
+    try {
+      const canvas = previewCanvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const clips = project.clips || [];
+
+      if (clips.length === 0) {
+        ctx.fillStyle = '#64748b';
+        ctx.font = '15px "Inter", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Ajoutez des clips depuis le chutier pour commencer le montage', canvas.width / 2, canvas.height / 2);
+
+        // Overlay active titles if any
+        for (const title of (project.titles || [])) {
+          if (time >= title.startTime && time <= title.startTime + title.duration) {
+            drawTitleOverlay(ctx, title, canvas.width, canvas.height, time - title.startTime);
+          }
+        }
+        // Overlay active images if any
+        if (project.images) {
+          for (const imgOverlay of (project.images || [])) {
+            if (time >= imgOverlay.startTime && time <= imgOverlay.startTime + imgOverlay.duration) {
+              const cachedImg = imagesCacheRef.current.get(imgOverlay.id);
+              if (cachedImg && cachedImg.complete && cachedImg.naturalWidth > 0) {
+                drawImageOverlay(ctx, imgOverlay, cachedImg, canvas.width, canvas.height, time - imgOverlay.startTime, true);
+              }
+            }
+          }
+        }
         return;
       }
 
-      if (e.key === 'Escape' && isFullscreen) {
-        e.preventDefault();
-        toggleFullscreen();
-      } else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault();
-        toggleFullscreen();
-      } else if (e.key === ' ' && isFullscreen) {
-        e.preventDefault();
-        togglePlay();
-      } else if (e.key === 'ArrowLeft' && isFullscreen) {
-        e.preventDefault();
-        const step = e.shiftKey ? 5 : 1;
-        handleSeek(Math.max(0, currentTime - step));
-      } else if (e.key === 'ArrowRight' && isFullscreen) {
-        e.preventDefault();
-        const step = e.shiftKey ? 5 : 1;
-        handleSeek(Math.min(totalDuration, currentTime + step));
+      // Apply Timeline Zoom Transform if active at preview time
+      const activeZoom = getActiveTimelineZoom(project.zooms || [], time);
+      const isZoomed = applyTimelineZoomTransform(ctx, activeZoom, time, canvas.width, canvas.height);
+
+      // Composite clips with transition support!
+      compositeActiveClipsToCanvas(
+        ctx,
+        time,
+        canvas.width,
+        canvas.height,
+        videoElementsRef.current,
+        imagesCacheRef.current,
+        false
+      );
+
+      // Restore zoom transform before drawing text titles
+      if (isZoomed) {
+        ctx.restore();
       }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isFullscreen, currentTime, totalDuration, isPlaying]);
+
+      for (const title of (project.titles || [])) {
+        if (time >= title.startTime && time <= title.startTime + title.duration) {
+          drawTitleOverlay(ctx, title, canvas.width, canvas.height, time - title.startTime);
+        }
+      }
+
+      if (project.images) {
+        for (const imgOverlay of (project.images || [])) {
+          if (time >= imgOverlay.startTime && time <= imgOverlay.startTime + imgOverlay.duration) {
+            let cachedImg = imagesCacheRef.current.get(imgOverlay.id);
+            if (!cachedImg && imgOverlay.dataUrl) {
+              cachedImg = new Image();
+              cachedImg.onload = () => {
+                if (!isPlayingRef.current) renderStaticPreviewAt(currentTimeRef.current);
+              };
+              cachedImg.src = imgOverlay.dataUrl;
+              imagesCacheRef.current.set(imgOverlay.id, cachedImg);
+            } else if (cachedImg && (!cachedImg.complete || cachedImg.naturalWidth === 0)) {
+              cachedImg.onload = () => {
+                if (!isPlayingRef.current) renderStaticPreviewAt(currentTimeRef.current);
+              };
+            }
+            if (cachedImg && cachedImg.complete && cachedImg.naturalWidth > 0) {
+              drawImageOverlay(ctx, imgOverlay, cachedImg, canvas.width, canvas.height, time - imgOverlay.startTime, true);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("renderStaticPreviewAt error:", err);
+    }
+  };
 
   // Live Canvas Rendering Loop
   useEffect(() => {
@@ -3606,147 +4344,16 @@ export function VideoEditorStudio() {
         const activeZoom = getActiveTimelineZoom(project.zooms || [], curTime);
         const isZoomed = applyTimelineZoomTransform(ctx, activeZoom, curTime, canvas.width, canvas.height);
 
-        let cumulative = 0;
-        const clips = project.clips || [];
-        for (let i = 0; i < clips.length; i++) {
-          const clip = clips[i];
-          const speed = clip.playbackSpeed && clip.playbackSpeed > 0 ? clip.playbackSpeed : 1.0;
-          const clipDuration = Math.max(0.1, (clip.endTrim - clip.startTrim) / speed);
-          const isLast = i === clips.length - 1;
-          const transDur = (!isLast && clip.transitionToNext !== 'none')
-            ? Math.min(clip.transitionDuration, clipDuration / 2)
-            : 0;
-
-          const clipStart = cumulative;
-          const clipEnd = cumulative + clipDuration;
-          const videoEl = videoElementsRef.current.get(clip.id);
-
-          if (curTime >= clipStart && curTime <= clipEnd) {
-            if (clip.type === 'slide' && clip.slideContent) {
-              drawSlideClip(ctx, clip.slideContent, canvas.width, canvas.height);
-            } else if (clip.type === 'image') {
-              let imgEl = imagesCacheRef.current.get(clip.id);
-              if (!imgEl && (clip.video?.thumbnail || (clip.video?.blob && clip.video.blob.size > 0))) {
-                imgEl = new Image();
-                imgEl.src = clip.video?.thumbnail || (clip.video?.blob ? URL.createObjectURL(clip.video.blob) : '');
-                imagesCacheRef.current.set(clip.id, imgEl);
-              }
-              if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
-                drawImageClip(ctx, imgEl, canvas.width, canvas.height);
-              }
-            } else if (videoEl) {
-              if (exportContainerRef.current && !exportContainerRef.current.contains(videoEl)) {
-                exportContainerRef.current.appendChild(videoEl);
-              }
-              videoEl.playbackRate = speed;
-              videoEl.muted = false;
-              videoEl.volume = 1.0;
-              if (videoEl.paused && isPlaying) {
-                videoEl.currentTime = ((curTime - clipStart) * speed) + clip.startTrim;
-                videoEl.play().catch(() => {});
-              }
-              if (videoEl.readyState >= 2) {
-                ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-                if (speed > 1.0) {
-                  drawFastForwardBadge(ctx, speed, canvas.width, canvas.height);
-                }
-              } else if (clip.video?.thumbnail) {
-                let thumbImg = imagesCacheRef.current.get(`thumb_${clip.id}`);
-                if (!thumbImg) {
-                  thumbImg = new Image();
-                  thumbImg.src = clip.video.thumbnail;
-                  imagesCacheRef.current.set(`thumb_${clip.id}`, thumbImg);
-                }
-                if (thumbImg && thumbImg.complete && thumbImg.naturalWidth > 0) {
-                  ctx.drawImage(thumbImg, 0, 0, canvas.width, canvas.height);
-                  if (speed > 1.0) {
-                    drawFastForwardBadge(ctx, speed, canvas.width, canvas.height);
-                  }
-                }
-              }
-            }
-
-            // Render transition to next clip
-            if (!isLast && clip.transitionToNext !== 'none' && curTime > clipEnd - transDur) {
-              const transProgress = (curTime - (clipEnd - transDur)) / transDur;
-              const nextClip = clips[i + 1];
-
-              const drawNextTransitionFrame = (targetCtx: CanvasRenderingContext2D, offX: number = 0) => {
-                if (!nextClip) return;
-                if (nextClip.type === 'slide' && nextClip.slideContent) {
-                  if (offX !== 0) {
-                    targetCtx.save();
-                    targetCtx.translate(offX, 0);
-                    drawSlideClip(targetCtx, nextClip.slideContent, canvas.width, canvas.height);
-                    targetCtx.restore();
-                  } else {
-                    drawSlideClip(targetCtx, nextClip.slideContent, canvas.width, canvas.height);
-                  }
-                } else if (nextClip.type === 'image') {
-                  let nextImg = imagesCacheRef.current.get(nextClip.id);
-                  if (!nextImg && (nextClip.video?.thumbnail || (nextClip.video?.blob && nextClip.video.blob.size > 0))) {
-                    nextImg = new Image();
-                    nextImg.src = nextClip.video?.thumbnail || (nextClip.video?.blob ? URL.createObjectURL(nextClip.video.blob) : '');
-                    imagesCacheRef.current.set(nextClip.id, nextImg);
-                  }
-                  if (nextImg && nextImg.complete && nextImg.naturalWidth > 0) {
-                    if (offX !== 0) {
-                      targetCtx.save();
-                      targetCtx.translate(offX, 0);
-                      drawImageClip(targetCtx, nextImg, canvas.width, canvas.height);
-                      targetCtx.restore();
-                    } else {
-                      drawImageClip(targetCtx, nextImg, canvas.width, canvas.height);
-                    }
-                  }
-                } else {
-                  const nextVideoEl = videoElementsRef.current.get(nextClip.id);
-                  if (nextVideoEl) {
-                    if (exportContainerRef.current && !exportContainerRef.current.contains(nextVideoEl)) {
-                      exportContainerRef.current.appendChild(nextVideoEl);
-                    }
-                    nextVideoEl.muted = false;
-                    nextVideoEl.volume = Math.max(0, Math.min(1, transProgress));
-                    if (videoEl) {
-                      videoEl.volume = Math.max(0, Math.min(1, 1 - transProgress));
-                    }
-                    if (nextVideoEl.paused && isPlaying) {
-                      nextVideoEl.currentTime = nextClip.startTrim + (transProgress * transDur);
-                      nextVideoEl.play().catch(() => {});
-                    }
-                    if (nextVideoEl.readyState >= 2) {
-                      targetCtx.drawImage(nextVideoEl, offX, 0, canvas.width, canvas.height);
-                    }
-                  }
-                }
-              };
-
-              ctx.save();
-              if (clip.transitionToNext === 'crossfade') {
-                ctx.globalAlpha = transProgress;
-                drawNextTransitionFrame(ctx, 0);
-              } else if (clip.transitionToNext === 'fade-black') {
-                ctx.fillStyle = '#000000';
-                ctx.globalAlpha = Math.sin(transProgress * Math.PI);
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-              } else if (clip.transitionToNext === 'slide') {
-                const offsetX = (1.0 - transProgress) * canvas.width;
-                drawNextTransitionFrame(ctx, offsetX);
-              }
-              ctx.restore();
-            }
-          } else {
-            if (videoEl) {
-              videoEl.muted = true;
-              videoEl.volume = 0;
-              if (!videoEl.paused && (curTime < clipStart - 1 || curTime > clipEnd + 1)) {
-                videoEl.pause();
-              }
-            }
-          }
-
-          cumulative += clipDuration - transDur;
-        }
+        // Composite clips with transition and Track 1/Track 2 overlap support!
+        compositeActiveClipsToCanvas(
+          ctx,
+          curTime,
+          canvas.width,
+          canvas.height,
+          videoElementsRef.current,
+          imagesCacheRef.current,
+          true
+        );
 
         // Restore zoom transform before drawing text titles on top
         if (isZoomed) {
@@ -3808,262 +4415,251 @@ export function VideoEditorStudio() {
     };
   }, [isPlaying, totalDuration, project]);
 
-  const renderStaticPreviewAt = (time: number) => {
-    try {
-      const canvas = previewCanvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      ctx.fillStyle = '#0a0a0a';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      const clips = project.clips || [];
-
-      if (clips.length === 0) {
-        ctx.fillStyle = '#64748b';
-        ctx.font = '15px "Inter", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('Ajoutez des clips depuis le chutier pour commencer le montage', canvas.width / 2, canvas.height / 2);
-
-        // Overlay active titles if any
-        for (const title of (project.titles || [])) {
-          if (time >= title.startTime && time <= title.startTime + title.duration) {
-            drawTitleOverlay(ctx, title, canvas.width, canvas.height, time - title.startTime);
-          }
+  // Check if any clip or selected title can be split at playhead
+  const canSplitAtPlayhead = useMemo(() => {
+    const curTime = currentTime;
+    if (selectedElement?.type === 'title') {
+      const title = (project.titles || []).find(t => t.id === selectedElement.id);
+      if (title && curTime > title.startTime + 0.1 && curTime < title.startTime + title.duration - 0.1) {
+        return true;
+      }
+    }
+    if (selectedClipId) {
+      const clip = (project.clips || []).find(c => c.id === selectedClipId);
+      if (clip) {
+        const off = clipTimelineOffsets.get(clip.id);
+        if (off && curTime > off.start + 0.05 && curTime < off.end - 0.05) {
+          return true;
         }
-        // Overlay active images if any
-        if (project.images) {
-          for (const imgOverlay of (project.images || [])) {
-            if (time >= imgOverlay.startTime && time <= imgOverlay.startTime + imgOverlay.duration) {
-              const cachedImg = imagesCacheRef.current.get(imgOverlay.id);
-              if (cachedImg && cachedImg.complete && cachedImg.naturalWidth > 0) {
-                drawImageOverlay(ctx, imgOverlay, cachedImg, canvas.width, canvas.height, time - imgOverlay.startTime, true);
-              }
-            }
-          }
+      }
+    }
+    return (project.clips || []).some(c => {
+      const off = clipTimelineOffsets.get(c.id);
+      return off && curTime > off.start + 0.05 && curTime < off.end - 0.05;
+    });
+  }, [project.clips, project.titles, selectedClipId, selectedElement, currentTime, clipTimelineOffsets]);
+
+  // Split clip or title at playhead position (Scinder / Ciseau)
+  const handleSplitAtPlayhead = useCallback(() => {
+    const curTime = currentTimeRef.current;
+
+    // 1. If a Title is selected and playhead is within it, split the title
+    if (selectedElement?.type === 'title') {
+      const titleIndex = (project.titles || []).findIndex(t => t.id === selectedElement.id);
+      if (titleIndex !== -1) {
+        const title = project.titles[titleIndex];
+        if (curTime > title.startTime + 0.1 && curTime < title.startTime + title.duration - 0.1) {
+          const firstDuration = Math.round((curTime - title.startTime) * 10) / 10;
+          const secondDuration = Math.round((title.duration - firstDuration) * 10) / 10;
+          const title1: TimelineTitle = {
+            ...title,
+            duration: Math.max(0.2, firstDuration)
+          };
+          const title2: TimelineTitle = {
+            ...title,
+            id: `title_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            startTime: Math.round(curTime * 10) / 10,
+            duration: Math.max(0.2, secondDuration)
+          };
+          const newTitles = [...project.titles];
+          newTitles.splice(titleIndex, 1, title1, title2);
+          setProject(prev => ({ ...prev, titles: newTitles }), true);
+          setSelectedElement({ type: 'title', id: title2.id });
+          setClipDragFeedback(`✂️ Titre scindé à ${formatTime(curTime)}`);
+          setTimeout(() => setClipDragFeedback(null), 2000);
+          return;
         }
+      }
+    }
+
+    // 2. Identify target clip: first check selectedClipId, then any clip under playhead
+    let targetClip: TimelineClip | null = null;
+    let targetOffset: { start: number; end: number; duration: number } | null = null;
+
+    if (selectedClipId) {
+      const found = project.clips.find(c => c.id === selectedClipId);
+      if (found) {
+        const off = clipTimelineOffsets.get(found.id);
+        if (off && curTime > off.start + 0.05 && curTime < off.end - 0.05) {
+          targetClip = found;
+          targetOffset = off;
+        }
+      }
+    }
+
+    if (!targetClip) {
+      // Find clips intersecting playhead
+      const candidates = project.clips.filter(c => {
+        const off = clipTimelineOffsets.get(c.id);
+        return off && curTime > off.start + 0.05 && curTime < off.end - 0.05;
+      });
+      if (candidates.length > 0) {
+        // Prioritize V1 or first candidate
+        targetClip = candidates.find(c => c.track !== 2) || candidates[0];
+        targetOffset = clipTimelineOffsets.get(targetClip.id) || null;
+      }
+    }
+
+    if (!targetClip || !targetOffset) return;
+
+    const deltaTimeline = curTime - targetOffset.start;
+    const speed = targetClip.playbackSpeed && targetClip.playbackSpeed > 0 ? targetClip.playbackSpeed : 1.0;
+    const deltaSource = deltaTimeline * speed;
+    const splitSourceTime = Math.round((targetClip.startTrim + deltaSource) * 100) / 100;
+
+    const clipLeft: TimelineClip = {
+      ...targetClip,
+      endTrim: splitSourceTime,
+      startTime: targetOffset.start,
+      transitionToNext: 'none',
+      transitionDuration: 0
+    };
+
+    const newClipId = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const clipRight: TimelineClip = {
+      ...targetClip,
+      id: newClipId,
+      startTrim: splitSourceTime,
+      startTime: Math.round(curTime * 10) / 10,
+      slideContent: targetClip.slideContent ? JSON.parse(JSON.stringify(targetClip.slideContent)) : undefined
+    };
+
+    const clipIndex = project.clips.findIndex(c => c.id === targetClip!.id);
+    if (clipIndex === -1) return;
+
+    const nextClips = [...project.clips];
+    nextClips.splice(clipIndex, 1, clipLeft, clipRight);
+
+    setProject(prev => ({
+      ...prev,
+      clips: nextClips
+    }), true);
+
+    setSelectedClipId(newClipId);
+    setSelectedElement({ type: 'clip', id: newClipId });
+    setClipDragFeedback(`✂️ Clip scindé en 2 à ${formatTime(curTime)}`);
+    setTimeout(() => setClipDragFeedback(null), 2500);
+
+    if (!isPlayingRef.current) {
+      renderStaticPreviewAt(curTime);
+    }
+  }, [
+    project.clips,
+    project.titles,
+    selectedClipId,
+    selectedElement,
+    clipTimelineOffsets,
+    setProject,
+    renderStaticPreviewAt
+  ]);
+
+  // Keyboard navigation & shortcuts (F for fullscreen, Space, Left/Right seek, Delete for delete, Ctrl+Z for undo, Ctrl+Y for redo, C / S for split)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
         return;
       }
 
-      // Apply Timeline Zoom Transform if active at preview time
-      const activeZoom = getActiveTimelineZoom(project.zooms || [], time);
-      const isZoomed = applyTimelineZoomTransform(ctx, activeZoom, time, canvas.width, canvas.height);
-
-      let cumulative = 0;
-      for (let i = 0; i < clips.length; i++) {
-        const clip = clips[i];
-        const speed = clip.playbackSpeed && clip.playbackSpeed > 0 ? clip.playbackSpeed : 1.0;
-        const clipDuration = Math.max(0.1, (clip.endTrim - clip.startTrim) / speed);
-        const isLast = i === clips.length - 1;
-        const transDur = (!isLast && clip.transitionToNext !== 'none')
-          ? Math.min(clip.transitionDuration, clipDuration / 2)
-          : 0;
-
-        const clipStart = cumulative;
-        const clipEnd = cumulative + clipDuration;
-
-        if (time >= clipStart && time <= clipEnd) {
-          if (clip.type === 'slide' && clip.slideContent) {
-            drawSlideClip(ctx, clip.slideContent, canvas.width, canvas.height);
-          } else if (clip.type === 'image') {
-            let imgEl = imagesCacheRef.current.get(clip.id);
-            if (!imgEl && (clip.video?.thumbnail || (clip.video?.blob && clip.video.blob.size > 0))) {
-              imgEl = new Image();
-              imgEl.src = clip.video?.thumbnail || (clip.video?.blob ? URL.createObjectURL(clip.video.blob) : '');
-              imagesCacheRef.current.set(clip.id, imgEl);
-            }
-            if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
-              drawImageClip(ctx, imgEl, canvas.width, canvas.height);
-            }
+      // Undo / Redo: Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        if (e.key === 'z' || e.key === 'Z') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            handleRedo();
           } else {
-            const videoEl = videoElementsRef.current.get(clip.id);
-            let frameDrawn = false;
-
-            if (videoEl) {
-              const targetClipTime = Math.max(0, Math.min(
-                videoEl.duration || 9999,
-                ((time - clipStart) * speed) + clip.startTrim
-              ));
-              const timeDiff = Math.abs(videoEl.currentTime - targetClipTime);
-
-              // Draw the current ready frame immediately so preview does not flash black
-              if (videoEl.readyState >= 2) {
-                ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-                if (speed > 1.0) {
-                  drawFastForwardBadge(ctx, speed, canvas.width, canvas.height);
-                }
-                frameDrawn = true;
-              }
-
-              // If the target position is different, perform seek and re-render once seeked
-              if (timeDiff > 0.05) {
-                const onSeeked = () => {
-                  videoEl.removeEventListener('seeked', onSeeked);
-                  if (!isPlayingRef.current) {
-                    renderStaticPreviewAt(currentTimeRef.current);
-                  }
-                };
-                videoEl.addEventListener('seeked', onSeeked, { once: true });
-                videoEl.currentTime = targetClipTime;
-              } else if (videoEl.readyState < 2) {
-                // Wait for video data if not yet loaded
-                const onCanPlay = () => {
-                  videoEl.removeEventListener('canplay', onCanPlay);
-                  videoEl.removeEventListener('loadeddata', onCanPlay);
-                  if (!isPlayingRef.current) {
-                    renderStaticPreviewAt(currentTimeRef.current);
-                  }
-                };
-                videoEl.addEventListener('canplay', onCanPlay, { once: true });
-                videoEl.addEventListener('loadeddata', onCanPlay, { once: true });
-              }
-            }
-
-            // Fallback if video frame is not yet ready: draw thumbnail so screen is NEVER black or empty!
-            if (!frameDrawn && clip.video?.thumbnail) {
-              let thumbImg = imagesCacheRef.current.get(`thumb_${clip.id}`);
-              if (!thumbImg) {
-                thumbImg = new Image();
-                thumbImg.onload = () => {
-                  if (!isPlayingRef.current) renderStaticPreviewAt(currentTimeRef.current);
-                };
-                thumbImg.src = clip.video.thumbnail;
-                imagesCacheRef.current.set(`thumb_${clip.id}`, thumbImg);
-              }
-              if (thumbImg && thumbImg.complete && thumbImg.naturalWidth > 0) {
-                ctx.drawImage(thumbImg, 0, 0, canvas.width, canvas.height);
-                if (speed > 1.0) {
-                  drawFastForwardBadge(ctx, speed, canvas.width, canvas.height);
-                }
-              }
-            }
+            handleUndo();
           }
-
-          // Render transition to next clip if inside transition window
-          if (!isLast && clip.transitionToNext !== 'none' && time > clipEnd - transDur) {
-            const transProgress = (time - (clipEnd - transDur)) / transDur;
-            const nextClip = clips[i + 1];
-
-            const drawNextStaticFrame = (targetCtx: CanvasRenderingContext2D, offX: number = 0) => {
-              if (!nextClip) return;
-              if (nextClip.type === 'slide' && nextClip.slideContent) {
-                if (offX !== 0) {
-                  targetCtx.save();
-                  targetCtx.translate(offX, 0);
-                  drawSlideClip(targetCtx, nextClip.slideContent, canvas.width, canvas.height);
-                  targetCtx.restore();
-                } else {
-                  drawSlideClip(targetCtx, nextClip.slideContent, canvas.width, canvas.height);
-                }
-              } else if (nextClip.type === 'image') {
-                let nextImg = imagesCacheRef.current.get(nextClip.id);
-                if (!nextImg && (nextClip.video?.thumbnail || (nextClip.video?.blob && nextClip.video.blob.size > 0))) {
-                  nextImg = new Image();
-                  nextImg.src = nextClip.video?.thumbnail || (nextClip.video?.blob ? URL.createObjectURL(nextClip.video.blob) : '');
-                  imagesCacheRef.current.set(nextClip.id, nextImg);
-                }
-                if (nextImg && nextImg.complete && nextImg.naturalWidth > 0) {
-                  if (offX !== 0) {
-                    targetCtx.save();
-                    targetCtx.translate(offX, 0);
-                    drawImageClip(targetCtx, nextImg, canvas.width, canvas.height);
-                    targetCtx.restore();
-                  } else {
-                    drawImageClip(targetCtx, nextImg, canvas.width, canvas.height);
-                  }
-                }
-              } else {
-                const nextVideoEl = videoElementsRef.current.get(nextClip.id);
-                if (nextVideoEl) {
-                  const nextTargetTime = nextClip.startTrim + (transProgress * transDur);
-                  if (Math.abs(nextVideoEl.currentTime - nextTargetTime) > 0.05) {
-                    const onNextSeeked = () => {
-                      nextVideoEl.removeEventListener('seeked', onNextSeeked);
-                      if (!isPlayingRef.current) {
-                        renderStaticPreviewAt(currentTimeRef.current);
-                      }
-                    };
-                    nextVideoEl.addEventListener('seeked', onNextSeeked, { once: true });
-                    nextVideoEl.currentTime = nextTargetTime;
-                  }
-
-                  if (nextVideoEl.readyState >= 2) {
-                    targetCtx.drawImage(nextVideoEl, offX, 0, canvas.width, canvas.height);
-                  } else if (nextClip.video?.thumbnail) {
-                    let nextThumb = imagesCacheRef.current.get(`thumb_${nextClip.id}`);
-                    if (!nextThumb) {
-                      nextThumb = new Image();
-                      nextThumb.src = nextClip.video.thumbnail;
-                      imagesCacheRef.current.set(`thumb_${nextClip.id}`, nextThumb);
-                    }
-                    if (nextThumb && nextThumb.complete && nextThumb.naturalWidth > 0) {
-                      targetCtx.drawImage(nextThumb, offX, 0, canvas.width, canvas.height);
-                    }
-                  }
-                }
-              }
-            };
-
-            ctx.save();
-            if (clip.transitionToNext === 'crossfade') {
-              ctx.globalAlpha = transProgress;
-              drawNextStaticFrame(ctx, 0);
-            } else if (clip.transitionToNext === 'fade-black') {
-              ctx.fillStyle = '#000000';
-              ctx.globalAlpha = Math.sin(transProgress * Math.PI);
-              ctx.fillRect(0, 0, canvas.width, canvas.height);
-            } else if (clip.transitionToNext === 'slide') {
-              const offsetX = (1.0 - transProgress) * canvas.width;
-              drawNextStaticFrame(ctx, offsetX);
-            }
-            ctx.restore();
-          }
-
-          break;
-        }
-
-        cumulative += clipDuration - transDur;
-      }
-
-      // Restore zoom transform before drawing text titles
-      if (isZoomed) {
-        ctx.restore();
-      }
-
-      for (const title of (project.titles || [])) {
-        if (time >= title.startTime && time <= title.startTime + title.duration) {
-          drawTitleOverlay(ctx, title, canvas.width, canvas.height, time - title.startTime);
+          return;
+        } else if (e.key === 'y' || e.key === 'Y') {
+          e.preventDefault();
+          handleRedo();
+          return;
         }
       }
 
-      if (project.images) {
-        for (const imgOverlay of (project.images || [])) {
-          if (time >= imgOverlay.startTime && time <= imgOverlay.startTime + imgOverlay.duration) {
-            let cachedImg = imagesCacheRef.current.get(imgOverlay.id);
-            if (!cachedImg && imgOverlay.dataUrl) {
-              cachedImg = new Image();
-              cachedImg.onload = () => {
-                if (!isPlayingRef.current) renderStaticPreviewAt(currentTimeRef.current);
-              };
-              cachedImg.src = imgOverlay.dataUrl;
-              imagesCacheRef.current.set(imgOverlay.id, cachedImg);
-            } else if (cachedImg && (!cachedImg.complete || cachedImg.naturalWidth === 0)) {
-              cachedImg.onload = () => {
-                if (!isPlayingRef.current) renderStaticPreviewAt(currentTimeRef.current);
-              };
-            }
-            if (cachedImg && cachedImg.complete && cachedImg.naturalWidth > 0) {
-              drawImageOverlay(ctx, imgOverlay, cachedImg, canvas.width, canvas.height, time - imgOverlay.startTime, true);
-            }
+      // Delete key: Supprimer / Delete / Backspace
+      if (e.key === 'Delete' || e.key === 'Backspace' || e.key === 'Del') {
+        if (
+          !isTitleModalOpen &&
+          !isSlideModalOpen &&
+          !isZoomModalOpen &&
+          !isVoiceoverModalOpen &&
+          !isVideoPickerOpen &&
+          !isImageSlidePickerOpen &&
+          !isImageModalOpen &&
+          !isProjectListModalOpen
+        ) {
+          if (selectedElement || selectedClipId) {
+            e.preventDefault();
+            handleDeleteSelected();
+            return;
           }
         }
       }
-    } catch (err) {
-      console.warn("renderStaticPreviewAt error:", err);
-    }
-  };
+
+      const isAnyModalOpen =
+        isTitleModalOpen ||
+        isSlideModalOpen ||
+        isZoomModalOpen ||
+        isVoiceoverModalOpen ||
+        isVideoPickerOpen ||
+        isImageSlidePickerOpen ||
+        isImageModalOpen ||
+        isProjectListModalOpen;
+
+      if (e.key === 'Escape' && isFullscreen) {
+        e.preventDefault();
+        toggleFullscreen();
+      } else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey && !isAnyModalOpen) {
+        e.preventDefault();
+        toggleFullscreen();
+      } else if ((e.key === ' ' || e.code === 'Space') && !isAnyModalOpen) {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.key === 'ArrowLeft' && !isAnyModalOpen) {
+        e.preventDefault();
+        const step = e.shiftKey ? 5 : 1;
+        handleSeek(Math.max(0, currentTimeRef.current - step));
+      } else if (e.key === 'ArrowRight' && !isAnyModalOpen) {
+        e.preventDefault();
+        const step = e.shiftKey ? 5 : 1;
+        handleSeek(Math.min(totalDuration, currentTimeRef.current + step));
+      } else if (
+        (e.key === 'c' || e.key === 'C' || e.key === 's' || e.key === 'S' ||
+         ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B' || e.key === 'k' || e.key === 'K'))) &&
+        !isAnyModalOpen
+      ) {
+        // C / S / Ctrl+B / Ctrl+K : Scinder / Couper à la position de la tête de lecture
+        e.preventDefault();
+        handleSplitAtPlayhead();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    isFullscreen,
+    currentTime,
+    totalDuration,
+    isPlaying,
+    selectedElement,
+    selectedClipId,
+    togglePlay,
+    handleSeek,
+    handleUndo,
+    handleRedo,
+    handleDeleteSelected,
+    handleSplitAtPlayhead,
+    isTitleModalOpen,
+    isSlideModalOpen,
+    isZoomModalOpen,
+    isVoiceoverModalOpen,
+    isVideoPickerOpen,
+    isImageSlidePickerOpen,
+    isImageModalOpen,
+    isProjectListModalOpen
+  ]);
+
 
   // --- Project Video Export ---
 
@@ -4171,19 +4767,23 @@ export function VideoEditorStudio() {
       // Create fresh dedicated video elements for this export session in the DOM (skip slides and images)
       for (const clip of project.clips) {
         if (clip.type === 'slide' || clip.type === 'image') continue;
+        const clipVol = clip.volume !== undefined ? clip.volume : 1.0;
         const v = document.createElement('video');
         v.src = URL.createObjectURL(clip.video.blob);
         v.preload = 'auto';
         v.playsInline = true;
-        v.muted = false;
-        v.volume = 1.0;
+        v.muted = (clipVol === 0);
+        v.volume = Math.max(0, Math.min(1, clipVol));
         container.appendChild(v);
         exportVideos.set(clip.id, v);
 
         try {
           const source = exportAudioCtx.createMediaElementSource(v);
-          source.connect(dest);
-          source.connect(voiceAnalyser);
+          const clipGain = exportAudioCtx.createGain();
+          clipGain.gain.value = Math.max(0, Math.min(1, clipVol));
+          source.connect(clipGain);
+          clipGain.connect(dest);
+          clipGain.connect(voiceAnalyser);
         } catch (audioErr) {
           console.warn("Audio node connection error for clip:", clip.id, audioErr);
         }
@@ -4393,108 +4993,16 @@ export function VideoEditorStudio() {
       const activeZoom = getActiveTimelineZoom(project.zooms, currentExportTime);
       const isZoomed = applyTimelineZoomTransform(exportCtx, activeZoom, currentExportTime, exportCanvas.width, exportCanvas.height);
 
-      let cumulative = 0;
-      for (let i = 0; i < project.clips.length; i++) {
-        const clip = project.clips[i];
-        const speed = clip.playbackSpeed && clip.playbackSpeed > 0 ? clip.playbackSpeed : 1.0;
-        const clipDuration = Math.max(0.1, (clip.endTrim - clip.startTrim) / speed);
-        const isLast = i === project.clips.length - 1;
-        const transDur = (!isLast && clip.transitionToNext !== 'none')
-          ? Math.min(clip.transitionDuration, clipDuration / 2)
-          : 0;
-
-        const clipStart = cumulative;
-        const clipEnd = cumulative + clipDuration;
-        const videoEl = exportVideos.get(clip.id);
-
-        if (currentExportTime >= clipStart && currentExportTime <= clipEnd) {
-          if (clip.type === 'slide' && clip.slideContent) {
-            drawSlideClip(exportCtx, clip.slideContent, exportCanvas.width, exportCanvas.height);
-          } else if (clip.type === 'image') {
-            const cachedImg = imagesCacheRef.current.get(clip.id);
-            if (cachedImg && cachedImg.complete && cachedImg.naturalWidth > 0) {
-              drawImageClip(exportCtx, cachedImg, exportCanvas.width, exportCanvas.height);
-            }
-          } else if (videoEl) {
-            videoEl.playbackRate = speed;
-            if (videoEl.paused) {
-              const expectedVideoTime = clip.startTrim + ((currentExportTime - clipStart) * speed);
-              videoEl.currentTime = expectedVideoTime;
-              videoEl.play().catch(() => {});
-            }
-
-            if (videoEl.readyState >= 1) {
-              exportCtx.drawImage(videoEl, 0, 0, exportCanvas.width, exportCanvas.height);
-              if (speed > 1.0) {
-                drawFastForwardBadge(exportCtx, speed, exportCanvas.width, exportCanvas.height);
-              }
-            }
-          }
-
-          if (!isLast && clip.transitionToNext !== 'none' && currentExportTime > clipEnd - transDur) {
-            const transProgress = (currentExportTime - (clipEnd - transDur)) / transDur;
-            const nextClip = project.clips[i + 1];
-
-            const drawNextExportFrame = (targetCtx: CanvasRenderingContext2D, offX: number = 0) => {
-              if (nextClip.type === 'slide' && nextClip.slideContent) {
-                if (offX !== 0) {
-                  targetCtx.save();
-                  targetCtx.translate(offX, 0);
-                  drawSlideClip(targetCtx, nextClip.slideContent, exportCanvas.width, exportCanvas.height);
-                  targetCtx.restore();
-                } else {
-                  drawSlideClip(targetCtx, nextClip.slideContent, exportCanvas.width, exportCanvas.height);
-                }
-              } else if (nextClip.type === 'image') {
-                const nextImg = imagesCacheRef.current.get(nextClip.id);
-                if (nextImg && nextImg.complete && nextImg.naturalWidth > 0) {
-                  if (offX !== 0) {
-                    targetCtx.save();
-                    targetCtx.translate(offX, 0);
-                    drawImageClip(targetCtx, nextImg, exportCanvas.width, exportCanvas.height);
-                    targetCtx.restore();
-                  } else {
-                    drawImageClip(targetCtx, nextImg, exportCanvas.width, exportCanvas.height);
-                  }
-                }
-              } else {
-                const nextVideoEl = exportVideos.get(nextClip.id);
-                if (nextVideoEl) {
-                  if (nextVideoEl.paused) {
-                    const nextExpectedTime = nextClip.startTrim + (transProgress * transDur);
-                    nextVideoEl.currentTime = nextExpectedTime;
-                    nextVideoEl.play().catch(() => {});
-                  }
-
-                  if (nextVideoEl.readyState >= 1) {
-                    targetCtx.drawImage(nextVideoEl, offX, 0, exportCanvas.width, exportCanvas.height);
-                  }
-                }
-              }
-            };
-
-            exportCtx.save();
-            if (clip.transitionToNext === 'crossfade') {
-              exportCtx.globalAlpha = transProgress;
-              drawNextExportFrame(exportCtx, 0);
-            } else if (clip.transitionToNext === 'fade-black') {
-              exportCtx.fillStyle = '#000000';
-              exportCtx.globalAlpha = Math.sin(transProgress * Math.PI);
-              exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
-            } else if (clip.transitionToNext === 'slide') {
-              const offsetX = (1.0 - transProgress) * exportCanvas.width;
-              drawNextExportFrame(exportCtx, offsetX);
-            }
-            exportCtx.restore();
-          }
-        } else {
-          if (videoEl && !videoEl.paused && (currentExportTime < clipStart - 0.5 || currentExportTime > clipEnd + 0.5)) {
-            videoEl.pause();
-          }
-        }
-
-        cumulative += clipDuration - transDur;
-      }
+      // Composite clips with transition and Track 1/Track 2 overlap support!
+      compositeActiveClipsToCanvas(
+        exportCtx,
+        currentExportTime,
+        exportCanvas.width,
+        exportCanvas.height,
+        exportVideos,
+        imagesCacheRef.current,
+        true
+      );
 
 
       // Restore zoom transform before drawing text titles on top
@@ -5474,6 +5982,29 @@ export function VideoEditorStudio() {
                   </button>
 
                   <button
+                    onClick={handleSplitAtPlayhead}
+                    disabled={!canSplitAtPlayhead}
+                    className="btn-toolbar"
+                    style={{
+                      padding: '5px 12px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      color: canSplitAtPlayhead ? '#fb7185' : 'var(--text-muted)',
+                      borderColor: canSplitAtPlayhead ? 'rgba(244, 63, 94, 0.45)' : 'rgba(255, 255, 255, 0.1)',
+                      backgroundColor: canSplitAtPlayhead ? 'rgba(244, 63, 94, 0.15)' : 'transparent',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      opacity: canSplitAtPlayhead ? 1 : 0.4,
+                      cursor: canSplitAtPlayhead ? 'pointer' : 'not-allowed'
+                    }}
+                    title={canSplitAtPlayhead ? "Couper le clip à la tête de lecture (Touche C ou S)" : "Placez la tête de lecture sur un clip pour le couper"}
+                  >
+                    <Scissors size={12} color={canSplitAtPlayhead ? '#fb7185' : 'currentColor'} />
+                    <span>Couper (C)</span>
+                  </button>
+
+                  <button
                     onClick={isRecordingVoiceover ? stopVoiceoverRecording : startVoiceoverRecording}
                     className={isRecordingVoiceover ? "btn-danger pulse-recording" : "btn-toolbar"}
                     style={{
@@ -5515,7 +6046,7 @@ export function VideoEditorStudio() {
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                   <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                    [Espace] Lecture • [← →] Saut 1s • [Échap] ou [F] Quitter
+                    [Espace] Lecture • [C] Couper • [Suppr] Supprimer • [← →] Saut 1s • [Échap] Quitter
                   </span>
                   <button
                     onClick={toggleFullscreen}
@@ -5558,6 +6089,29 @@ export function VideoEditorStudio() {
               <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                 <button
                   className="btn-toolbar"
+                  onClick={handleSplitAtPlayhead}
+                  disabled={!canSplitAtPlayhead}
+                  style={{
+                    fontSize: '11px',
+                    padding: '3px 8px',
+                    color: canSplitAtPlayhead ? '#fb7185' : 'var(--text-muted)',
+                    borderColor: canSplitAtPlayhead ? 'rgba(244, 63, 94, 0.45)' : 'rgba(255, 255, 255, 0.1)',
+                    backgroundColor: canSplitAtPlayhead ? 'rgba(244, 63, 94, 0.12)' : 'transparent',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontWeight: 600,
+                    opacity: canSplitAtPlayhead ? 1 : 0.45,
+                    cursor: canSplitAtPlayhead ? 'pointer' : 'not-allowed'
+                  }}
+                  title={canSplitAtPlayhead ? "Couper le clip à la tête de lecture (Raccourci : C ou S)" : "Placez la tête de lecture sur un clip pour le scinder"}
+                >
+                  <Scissors size={12} color={canSplitAtPlayhead ? '#fb7185' : 'currentColor'} />
+                  <span>Couper (C)</span>
+                </button>
+
+                <button
+                  className="btn-toolbar"
                   onClick={() => {
                     setTitleForm({
                       id: '',
@@ -5566,8 +6120,9 @@ export function VideoEditorStudio() {
                       startTime: Math.round(currentTime * 10) / 10,
                       duration: 3,
                       style: 'lowerthird',
+                      animation: 'slide-up',
                       textColor: '#ffffff',
-                      bgColor: 'rgba(15, 23, 42, 0.85)',
+                      bgColor: 'rgba(15, 23, 42, 0.88)',
                       fontSize: 28
                     });
                     setIsTitleModalOpen(true);
@@ -5793,7 +6348,7 @@ export function VideoEditorStudio() {
       {/* Bottom Timeline Multi-Track Panel */}
       <div className="glass-panel" style={{ padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             {/* View Mode Toggle: Spatial / Filmstrip / Compact */}
             <div style={{
               display: 'flex',
@@ -5865,6 +6420,158 @@ export function VideoEditorStudio() {
                 <span>Cartes Compactes</span>
               </button>
             </div>
+
+            {/* Potard Horizontal d'Échelle de la Timeline (Fader Console) */}
+            <div className="timeline-potard-wrapper" title="Potard d'Échelle de la Timeline (Ctrl + Molette au-dessus de la frise pour zoomer)">
+              <button
+                type="button"
+                className="timeline-potard-btn"
+                onClick={() => setTimelineScale(prev => Math.max(1, Math.round((prev - 0.5) * 10) / 10))}
+                disabled={timelineScale <= 1}
+                title="Zoom Arrière (Échelle -)"
+              >
+                <ZoomOut size={12} />
+              </button>
+
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px' }}>
+                <input
+                  type="range"
+                  className="timeline-potard-slider"
+                  min={1}
+                  max={8}
+                  step={0.1}
+                  value={timelineScale}
+                  onChange={(e) => setTimelineScale(parseFloat(e.target.value))}
+                  onDoubleClick={() => setTimelineScale(1)}
+                  title={`Échelle Frise : ${timelineScale.toFixed(1)}x (Double-cliquez pour réinitialiser à 1x)`}
+                />
+                {/* Repères visuels sous le potard */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', padding: '0 2px', fontSize: '7px', fontFamily: 'monospace', color: 'var(--text-muted)', pointerEvents: 'none' }}>
+                  <span>1x</span>
+                  <span>2x</span>
+                  <span>4x</span>
+                  <span>8x</span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="timeline-potard-btn"
+                onClick={() => setTimelineScale(prev => Math.min(8, Math.round((prev + 0.5) * 10) / 10))}
+                disabled={timelineScale >= 8}
+                title="Zoom Avant (Échelle +)"
+              >
+                <ZoomIn size={12} />
+              </button>
+
+              {/* Badge d'Échelle / Réinitialisation rapide */}
+              <button
+                type="button"
+                onClick={() => setTimelineScale(1)}
+                style={{
+                  background: timelineScale > 1 ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${timelineScale > 1 ? 'rgba(56, 189, 248, 0.4)' : 'rgba(255,255,255,0.1)'}`,
+                  color: timelineScale > 1 ? '#38bdf8' : 'var(--text-muted)',
+                  fontSize: '9px',
+                  fontFamily: 'monospace',
+                  fontWeight: 700,
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                  minWidth: '28px',
+                  textAlign: 'center',
+                  transition: 'all 0.15s ease'
+                }}
+                title="Facteur d'échelle actuel. Cliquez pour réinitialiser à 1x (Pleine vue)"
+              >
+                {timelineScale.toFixed(1)}x
+              </button>
+            </div>
+
+            {/* Undo / Redo History Buttons */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '3px', borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '8px' }}>
+              <button
+                type="button"
+                className="btn-toolbar"
+                onClick={handleUndo}
+                disabled={!canUndo}
+                style={{
+                  padding: '2px 7px',
+                  fontSize: '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  opacity: canUndo ? 1 : 0.4,
+                  cursor: canUndo ? 'pointer' : 'not-allowed'
+                }}
+                title="Annuler la dernière action (Ctrl + Z)"
+              >
+                <Undo2 size={11} />
+                <span>Annuler</span>
+              </button>
+              <button
+                type="button"
+                className="btn-toolbar"
+                onClick={handleRedo}
+                disabled={!canRedo}
+                style={{
+                  padding: '2px 7px',
+                  fontSize: '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  opacity: canRedo ? 1 : 0.4,
+                  cursor: canRedo ? 'pointer' : 'not-allowed'
+                }}
+                title="Rétablir l'action (Ctrl + Y ou Ctrl + Maj + Z)"
+              >
+                <Redo2 size={11} />
+                <span>Rétablir</span>
+              </button>
+
+              {/* Scissor / Razor Cut Button */}
+              <button
+                type="button"
+                onClick={handleSplitAtPlayhead}
+                disabled={!canSplitAtPlayhead}
+                style={{
+                  background: canSplitAtPlayhead ? 'rgba(244, 63, 94, 0.15)' : 'rgba(255,255,255,0.03)',
+                  border: canSplitAtPlayhead ? '1px solid rgba(244, 63, 94, 0.4)' : '1px solid rgba(255,255,255,0.08)',
+                  color: canSplitAtPlayhead ? '#fb7185' : 'var(--text-muted)',
+                  borderRadius: '4px',
+                  padding: '2px 8px',
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  cursor: canSplitAtPlayhead ? 'pointer' : 'not-allowed',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  transition: 'all 0.15s ease',
+                  opacity: canSplitAtPlayhead ? 1 : 0.45
+                }}
+                title={canSplitAtPlayhead ? "Scinder le clip à la position de la tête de lecture (Touche C ou S)" : "Placez la tête de lecture sur un clip pour le scinder"}
+              >
+                <Scissors size={11} color={canSplitAtPlayhead ? '#fb7185' : 'currentColor'} />
+                <span>Scinder (C)</span>
+              </button>
+            </div>
+
+            {/* Selected element badge with Delete shortcut hint */}
+            {(selectedElement || selectedClipId) && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', color: 'var(--text-muted)', borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '8px' }}>
+                <span style={{ color: '#38bdf8', fontWeight: 600 }}>Élément sélectionné</span>
+                <span>• Touche</span>
+                <kbd style={{ background: 'rgba(255,255,255,0.12)', color: '#ffffff', padding: '1px 4px', borderRadius: '3px', fontSize: '8px', border: '1px solid rgba(255,255,255,0.25)', fontFamily: 'monospace' }}>Suppr</kbd>
+                <button
+                  type="button"
+                  onClick={handleDeleteSelected}
+                  style={{ background: 'none', border: 'none', color: '#fb7185', cursor: 'pointer', padding: '1px 3px', display: 'flex', alignItems: 'center' }}
+                  title="Supprimer l'élément sélectionné (Touche Suppr)"
+                >
+                  <Trash2 size={10} />
+                </button>
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '48%' }}>
@@ -5886,16 +6593,28 @@ export function VideoEditorStudio() {
           </div>
         </div>
 
-        {/* Master Timeline Ruler with Time Markers & Unified Playhead Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 8px' }}>
-          <div style={{ width: '160px', minWidth: '160px', maxWidth: '160px', flexShrink: 0, boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: '8px' }}>
-            <span style={{ fontSize: '10px', fontFamily: 'monospace', fontWeight: 700, color: '#38bdf8' }}>
-              {formatTime(currentTime)}
-            </span>
-            <span style={{ fontSize: '9px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
-              / {formatTime(totalDuration)}
-            </span>
-          </div>
+        {/* Synchronized Horizontally Scrollable Timeline Body */}
+        <div
+          ref={timelineScrollContainerRef}
+          className="timeline-scroll-viewport"
+        >
+          <div style={{
+            minWidth: `${Math.round(timelineScale * 100)}%`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            paddingBottom: '4px'
+          }}>
+            {/* Master Timeline Ruler with Time Markers & Unified Playhead Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 8px' }}>
+              <div className="timeline-track-sticky-header" style={{ width: '160px', minWidth: '160px', maxWidth: '160px', flexShrink: 0, boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: '8px' }}>
+                <span style={{ fontSize: '10px', fontFamily: 'monospace', fontWeight: 700, color: '#38bdf8' }}>
+                  {formatTime(currentTime)}
+                </span>
+                <span style={{ fontSize: '9px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                  / {formatTime(totalDuration)}
+                </span>
+              </div>
 
           <div
             ref={timelineRulerRef}
@@ -5970,24 +6689,25 @@ export function VideoEditorStudio() {
           </div>
         </div>
 
-        {/* Track 1: Video Clips & Transitions */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: 'rgba(0,0,0,0.25)', padding: '6px 8px', borderRadius: '5px' }}>
+        {/* Track V2: Piste Vidéo 2 (Alternée / Désengorgement) */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: 'rgba(0,0,0,0.25)', padding: '5px 8px', borderRadius: '5px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '160px', minWidth: '160px', maxWidth: '160px', flexShrink: 0, boxSizing: 'border-box', paddingRight: '8px' }}>
+            <div className="timeline-track-sticky-header" style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '160px', minWidth: '160px', maxWidth: '160px', flexShrink: 0, boxSizing: 'border-box', paddingRight: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <Film size={11} color="#06b6d4" />
-                <span style={{ fontSize: '10px', color: '#06b6d4', fontWeight: 700 }}>Piste Vidéo ({(project.clips || []).length})</span>
+                <Film size={11} color="#c084fc" />
+                <span style={{ fontSize: '10px', color: '#c084fc', fontWeight: 700 }}>Piste Vidéo 2 (V2) ({(project.clips || []).filter(c => c.track === 2).length})</span>
               </div>
               <div style={{ display: 'flex', gap: '3px', flexWrap: 'nowrap' }}>
                 <button
                   type="button"
                   className="btn-toolbar"
                   onClick={() => {
+                    setTargetTrackForInsert(2);
                     setVideoInsertPosition('current');
                     setIsVideoPickerOpen(true);
                   }}
-                  style={{ padding: '2px 4px', fontSize: '9px', backgroundColor: 'rgba(6, 182, 212, 0.2)', color: '#38bdf8', borderColor: 'rgba(6, 182, 212, 0.45)', display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}
-                  title="Insérer une vidéo depuis la bibliothèque ou importer depuis votre PC"
+                  style={{ padding: '2px 4px', fontSize: '9px', backgroundColor: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', borderColor: 'rgba(168, 85, 247, 0.45)', display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}
+                  title="Insérer une vidéo sur la Piste Vidéo 2 (V2)"
                 >
                   <Film size={9} />
                   <span>+ Vidéo</span>
@@ -5995,9 +6715,12 @@ export function VideoEditorStudio() {
                 <button
                   type="button"
                   className="btn-toolbar"
-                  onClick={() => openAddSlideModal('current')}
+                  onClick={() => {
+                    setTargetTrackForInsert(2);
+                    openAddSlideModal('current');
+                  }}
                   style={{ padding: '2px 4px', fontSize: '9px', backgroundColor: 'rgba(139, 92, 246, 0.2)', color: '#c084fc', borderColor: 'rgba(139, 92, 246, 0.45)', display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}
-                  title="Insérer une diapositive titre / carton de début ou de chapitre"
+                  title="Insérer une diapositive titre sur la Piste Vidéo 2 (V2)"
                 >
                   <Type size={9} />
                   <span>+ Diapo</span>
@@ -6006,11 +6729,12 @@ export function VideoEditorStudio() {
                   type="button"
                   className="btn-toolbar"
                   onClick={() => {
+                    setTargetTrackForInsert(2);
                     setImageSlideInsertPosition('current');
                     setIsImageSlidePickerOpen(true);
                   }}
                   style={{ padding: '2px 4px', fontSize: '9px', backgroundColor: 'rgba(16, 185, 129, 0.2)', color: '#34d399', borderColor: 'rgba(16, 185, 129, 0.45)', display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}
-                  title="Insérer une image comme clip plein écran sur la piste vidéo"
+                  title="Insérer une image sur la Piste Vidéo 2 (V2)"
                 >
                   <ImageIcon size={9} />
                   <span>+ Image</span>
@@ -6018,17 +6742,17 @@ export function VideoEditorStudio() {
               </div>
             </div>
 
-            {/* Spatial Aligned Video Lane */}
+            {/* Spatial Aligned Video Lane V2 */}
             {timelineViewMode === 'spatial' ? (
               <div
-                ref={videoLaneRef}
+                ref={videoLane2Ref}
                 className="timeline-spatial-lane"
-                onClick={(e) => handleVideoLaneSeek(e.clientX)}
+                onClick={(e) => handleVideoLaneSeek(e.clientX, e.currentTarget)}
                 onPointerDown={handleVideoLanePointerDown}
                 onPointerMove={handleVideoLanePointerMove}
                 onPointerUp={handleVideoLanePointerUp}
-                style={{ flexGrow: 1, position: 'relative', height: '52px', cursor: 'pointer', overflow: 'visible' }}
-                title="Cliquez ou glissez pour déplacer la tête de lecture sur la piste vidéo"
+                style={{ flexGrow: 1, position: 'relative', height: '48px', cursor: 'pointer', overflow: 'visible', backgroundColor: 'rgba(168, 85, 247, 0.04)', border: '1px dashed rgba(168, 85, 247, 0.25)', borderRadius: '4px' }}
+                title="Piste Vidéo 2 (V2) - Cliquez ou glissez pour déplacer la tête de lecture"
               >
                 {/* Ruler grid ticks */}
                 <div className="timeline-lane-ruler-grid">
@@ -6037,8 +6761,350 @@ export function VideoEditorStudio() {
                   ))}
                 </div>
 
-                {/* Clips mapped proportionally to total duration */}
+                {/* Live Drag Tooltip for Track 2 */}
+                {clipDragFeedback && activeClipDragId && (project.clips || []).some(c => c.id === activeClipDragId && c.track === 2) && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '-24px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    background: 'rgba(15, 23, 42, 0.95)',
+                    border: '1px solid #c084fc',
+                    color: '#e9d5ff',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    whiteSpace: 'nowrap',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
+                    zIndex: 30,
+                    pointerEvents: 'none'
+                  }}>
+                    ⏱️ {clipDragFeedback}
+                  </div>
+                )}
+
+                {/* Clips mapped to Track 2 */}
+                {(project.clips || []).map((clip) => {
+                  if (clip.track !== 2) return null;
+                  const offset = clipTimelineOffsets.get(clip.id) || { start: 0, end: 10, duration: 10 };
+                  const leftPct = (offset.start / safeDur) * 100;
+                  const widthPct = Math.max(1.5, (offset.duration / safeDur) * 100);
+                  const isSlide = clip.type === 'slide';
+                  const isImage = clip.type === 'image';
+                  const isActive = currentTime >= offset.start && currentTime <= offset.end;
+                  const isSelected = selectedClipId === clip.id;
+
+                  return (
+                    <div
+                      key={clip.id}
+                      onPointerDown={(e) => {
+                        handleStartClipDrag(e, clip.id, 'move', videoLane2Ref.current);
+                      }}
+                      onPointerMove={handleClipPointerMove}
+                      onPointerUp={handleClipPointerUp}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedClipId(clip.id);
+                        setSelectedElement({ type: 'clip', id: clip.id });
+                        handleSeek(offset.start);
+                      }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        if (isSlide) {
+                          setSelectedClipId(clip.id);
+                          openEditSlideModal(clip);
+                        }
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${leftPct}%`,
+                        width: `${widthPct}%`,
+                        top: '3px',
+                        bottom: '3px',
+                        borderRadius: '5px',
+                        backgroundColor: isSlide
+                          ? (isSelected ? 'rgba(168, 85, 247, 0.55)' : isActive ? 'rgba(168, 85, 247, 0.4)' : 'rgba(168, 85, 247, 0.28)')
+                          : isImage
+                            ? (isSelected ? 'rgba(16, 185, 129, 0.5)' : isActive ? 'rgba(16, 185, 129, 0.38)' : 'rgba(16, 185, 129, 0.25)')
+                            : (isSelected ? 'rgba(192, 132, 252, 0.45)' : isActive ? 'rgba(192, 132, 252, 0.35)' : 'rgba(147, 51, 234, 0.22)'),
+                        border: isSelected
+                          ? '2px solid #c084fc'
+                          : isActive
+                            ? '1.5px solid rgba(192, 132, 252, 0.75)'
+                            : '1px solid rgba(168, 85, 247, 0.45)',
+                        boxShadow: isSelected ? '0 0 10px rgba(192, 132, 252, 0.7)' : isActive ? '0 0 6px rgba(192, 132, 252, 0.4)' : 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '0 6px',
+                        boxSizing: 'border-box',
+                        overflow: 'hidden',
+                        cursor: activeClipDragId === clip.id ? 'grabbing' : 'grab',
+                        transition: activeClipDragId === clip.id ? 'none' : 'all 0.15s ease',
+                        userSelect: 'none',
+                        zIndex: isSelected ? 8 : (isActive ? 6 : 4)
+                      }}
+                      title={`[Piste 2] ${clip.video?.title || 'Clip'} (${offset.duration.toFixed(1)}s) - Glisser pour déplacer / ajuster chevauchement`}
+                    >
+                      {/* Left Resize / Trim Handle */}
+                      <div
+                        className="timeline-resize-handle timeline-resize-handle-left"
+                        onPointerDown={(e) => handleStartClipDrag(e, clip.id, 'resize-left', videoLane2Ref.current)}
+                        onPointerMove={handleClipPointerMove}
+                        onPointerUp={handleClipPointerUp}
+                        title="Ajuster le début / chevauchement"
+                      />
+
+                      {/* Left: Badge + Title */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
+                        <span style={{
+                          fontSize: '8px',
+                          fontWeight: 800,
+                          padding: '1px 4px',
+                          borderRadius: '3px',
+                          backgroundColor: 'rgba(168, 85, 247, 0.4)',
+                          color: '#e9d5ff'
+                        }}>
+                          {isSlide ? '📑 Diapo' : isImage ? '🖼️ Image' : '🎬 V2'}
+                        </span>
+                        <span style={{ fontSize: '9px', fontWeight: 600, color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {clip.video?.title || 'Clip'}
+                        </span>
+                      </div>
+
+                      {/* Right: Duration + Shuttle to V1 + Edit */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                        <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.75)', fontFamily: 'monospace', pointerEvents: 'none' }}>
+                          {offset.duration.toFixed(1)}s
+                        </span>
+                        <button
+                          type="button"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleClipTrack(clip.id, 1);
+                          }}
+                          style={{ background: 'rgba(6, 182, 212, 0.25)', border: '1px solid rgba(6, 182, 212, 0.45)', borderRadius: '3px', color: '#38bdf8', cursor: 'pointer', padding: '1px 4px', fontSize: '8px', fontWeight: 700 }}
+                          title="Faire descendre ce clip sur la Piste Vidéo 1 (V1)"
+                        >
+                          ⬇️ V1
+                        </button>
+                        {isSlide && (
+                          <button
+                            type="button"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedClipId(clip.id);
+                              openEditSlideModal(clip);
+                            }}
+                            style={{ background: 'transparent', border: 'none', color: '#c084fc', cursor: 'pointer', padding: '1px', fontSize: '9px' }}
+                            title="Modifier le style de cette diapo"
+                          >
+                            ⚙️
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Right Resize / Trim Handle */}
+                      <div
+                        className="timeline-resize-handle timeline-resize-handle-right"
+                        onPointerDown={(e) => handleStartClipDrag(e, clip.id, 'resize-right', videoLane2Ref.current)}
+                        onPointerMove={handleClipPointerMove}
+                        onPointerUp={handleClipPointerUp}
+                        title="Ajuster la fin / durée"
+                      />
+                    </div>
+                  );
+                })}
+
+                {/* Playhead Indicator on Track 2 */}
+                {totalDuration > 0 && (
+                  <div
+                    className="timeline-playhead-line"
+                    style={{ left: `${Math.max(0, Math.min(100, (currentTime / safeDur) * 100))}%` }}
+                  />
+                )}
+
+                {(!project.clips || project.clips.filter(c => c.track === 2).length === 0) && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', fontSize: '10px', color: 'rgba(192, 132, 252, 0.65)' }}>
+                    Piste Vidéo 2 vide — Déplacez des clips ici avec « ⬆️ V2 » pour aérer votre montage.
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Visual Overlap Indicator / Transition Connector between Track 2 & Track 1 */}
+        {detectedOverlaps.length > 0 && timelineViewMode === 'spatial' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '1px 8px', margin: '-2px 0' }}>
+            <div className="timeline-track-sticky-header" style={{ width: '160px', minWidth: '160px', maxWidth: '160px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: '8px' }}>
+              <span style={{ fontSize: '9px', fontWeight: 800, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                ✨ Transitions ({detectedOverlaps.length})
+              </span>
+            </div>
+            <div style={{ flexGrow: 1, position: 'relative', height: '22px' }}>
+              {detectedOverlaps.map(ovl => {
+                const leftPct = (ovl.start / safeDur) * 100;
+                const widthPct = Math.max(2.5, (ovl.duration / safeDur) * 100);
+                return (
+                  <div
+                    key={ovl.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSeek(ovl.start);
+                    }}
+                    style={{
+                      position: 'absolute',
+                      left: `${leftPct}%`,
+                      width: `${widthPct}%`,
+                      top: '0px',
+                      bottom: '0px',
+                      backgroundColor: 'rgba(245, 158, 11, 0.28)',
+                      border: '1.5px dashed #f59e0b',
+                      borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      zIndex: 10,
+                      padding: '0 2px',
+                      boxSizing: 'border-box'
+                    }}
+                    title={`Chevauchement V1 & V2: ${ovl.duration.toFixed(1)}s. Cliquez pour choisir la transition`}
+                  >
+                    <select
+                      value={ovl.clip1.transitionToNext || 'crossfade'}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        updateClipTransition(ovl.clip1.id, e.target.value as any, ovl.duration);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        background: 'rgba(15, 23, 42, 0.92)',
+                        color: '#fbbf24',
+                        border: '1px solid #f59e0b',
+                        borderRadius: '3px',
+                        fontSize: '9px',
+                        fontWeight: 700,
+                        padding: '1px 3px',
+                        cursor: 'pointer',
+                        maxWidth: '100%',
+                        height: '18px'
+                      }}
+                    >
+                      <option value="crossfade">✨ Fondu ({ovl.duration.toFixed(1)}s)</option>
+                      <option value="fade-black">🌑 Au noir ({ovl.duration.toFixed(1)}s)</option>
+                      <option value="slide">➡️ Gliss. ({ovl.duration.toFixed(1)}s)</option>
+                      <option value="none">✂️ Coupe ({ovl.duration.toFixed(1)}s)</option>
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Track V1: Piste Vidéo 1 (Principale) */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: 'rgba(0,0,0,0.25)', padding: '5px 8px', borderRadius: '5px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div className="timeline-track-sticky-header" style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '160px', minWidth: '160px', maxWidth: '160px', flexShrink: 0, boxSizing: 'border-box', paddingRight: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Film size={11} color="#06b6d4" />
+                <span style={{ fontSize: '10px', color: '#06b6d4', fontWeight: 700 }}>Piste Vidéo 1 (V1) ({(project.clips || []).filter(c => c.track !== 2).length})</span>
+              </div>
+              <div style={{ display: 'flex', gap: '3px', flexWrap: 'nowrap' }}>
+                <button
+                  type="button"
+                  className="btn-toolbar"
+                  onClick={() => {
+                    setTargetTrackForInsert(1);
+                    setVideoInsertPosition('current');
+                    setIsVideoPickerOpen(true);
+                  }}
+                  style={{ padding: '2px 4px', fontSize: '9px', backgroundColor: 'rgba(6, 182, 212, 0.2)', color: '#38bdf8', borderColor: 'rgba(6, 182, 212, 0.45)', display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}
+                  title="Insérer une vidéo sur la Piste Vidéo 1 (V1)"
+                >
+                  <Film size={9} />
+                  <span>+ Vidéo</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn-toolbar"
+                  onClick={() => {
+                    setTargetTrackForInsert(1);
+                    openAddSlideModal('current');
+                  }}
+                  style={{ padding: '2px 4px', fontSize: '9px', backgroundColor: 'rgba(139, 92, 246, 0.2)', color: '#c084fc', borderColor: 'rgba(139, 92, 246, 0.45)', display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}
+                  title="Insérer une diapositive titre sur la Piste Vidéo 1 (V1)"
+                >
+                  <Type size={9} />
+                  <span>+ Diapo</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn-toolbar"
+                  onClick={() => {
+                    setTargetTrackForInsert(1);
+                    setImageSlideInsertPosition('current');
+                    setIsImageSlidePickerOpen(true);
+                  }}
+                  style={{ padding: '2px 4px', fontSize: '9px', backgroundColor: 'rgba(16, 185, 129, 0.2)', color: '#34d399', borderColor: 'rgba(16, 185, 129, 0.45)', display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}
+                  title="Insérer une image sur la Piste Vidéo 1 (V1)"
+                >
+                  <ImageIcon size={9} />
+                  <span>+ Image</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Spatial Aligned Video Lane V1 */}
+            {timelineViewMode === 'spatial' ? (
+              <div
+                ref={videoLaneRef}
+                className="timeline-spatial-lane"
+                onClick={(e) => handleVideoLaneSeek(e.clientX, e.currentTarget)}
+                onPointerDown={handleVideoLanePointerDown}
+                onPointerMove={handleVideoLanePointerMove}
+                onPointerUp={handleVideoLanePointerUp}
+                style={{ flexGrow: 1, position: 'relative', height: '48px', cursor: 'pointer', overflow: 'visible', backgroundColor: 'rgba(6, 182, 212, 0.04)', border: '1px dashed rgba(6, 182, 212, 0.25)', borderRadius: '4px' }}
+                title="Piste Vidéo 1 (V1) - Cliquez ou glissez pour déplacer la tête de lecture"
+              >
+                {/* Ruler grid ticks */}
+                <div className="timeline-lane-ruler-grid">
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <div key={i} className="timeline-lane-ruler-tick" />
+                  ))}
+                </div>
+
+                {/* Live Drag Tooltip for Track 1 */}
+                {clipDragFeedback && activeClipDragId && (project.clips || []).some(c => c.id === activeClipDragId && c.track !== 2) && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '-24px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    background: 'rgba(15, 23, 42, 0.95)',
+                    border: '1px solid #38bdf8',
+                    color: '#38bdf8',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    whiteSpace: 'nowrap',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
+                    zIndex: 30,
+                    pointerEvents: 'none'
+                  }}>
+                    ⏱️ {clipDragFeedback}
+                  </div>
+                )}
+
+                {/* Clips mapped to Track 1 */}
                 {(project.clips || []).map((clip, idx) => {
+                  if (clip.track === 2) return null;
                   const offset = clipTimelineOffsets.get(clip.id) || { start: 0, end: 10, duration: 10 };
                   const leftPct = (offset.start / safeDur) * 100;
                   const widthPct = Math.max(1.5, (offset.duration / safeDur) * 100);
@@ -6050,10 +7116,23 @@ export function VideoEditorStudio() {
                   return (
                     <div
                       key={clip.id}
+                      onPointerDown={(e) => {
+                        handleStartClipDrag(e, clip.id, 'move', videoLaneRef.current);
+                      }}
+                      onPointerMove={handleClipPointerMove}
+                      onPointerUp={handleClipPointerUp}
                       onClick={(e) => {
                         e.stopPropagation();
                         setSelectedClipId(clip.id);
+                        setSelectedElement({ type: 'clip', id: clip.id });
                         handleSeek(offset.start);
+                      }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        if (isSlide) {
+                          setSelectedClipId(clip.id);
+                          openEditSlideModal(clip);
+                        }
                       }}
                       style={{
                         position: 'absolute',
@@ -6063,34 +7142,44 @@ export function VideoEditorStudio() {
                         bottom: '3px',
                         borderRadius: '5px',
                         backgroundColor: isSlide
-                          ? (isActive ? 'rgba(139, 92, 246, 0.4)' : 'rgba(139, 92, 246, 0.22)')
+                          ? (isSelected ? 'rgba(139, 92, 246, 0.45)' : isActive ? 'rgba(139, 92, 246, 0.35)' : 'rgba(139, 92, 246, 0.22)')
                           : isImage
-                            ? (isActive ? 'rgba(16, 185, 129, 0.38)' : 'rgba(16, 185, 129, 0.2)')
-                            : (isActive ? 'rgba(6, 182, 212, 0.35)' : 'rgba(15, 23, 42, 0.7)'),
-                        border: isActive
+                            ? (isSelected ? 'rgba(16, 185, 129, 0.45)' : isActive ? 'rgba(16, 185, 129, 0.35)' : 'rgba(16, 185, 129, 0.2)')
+                            : (isSelected ? 'rgba(6, 182, 212, 0.4)' : isActive ? 'rgba(6, 182, 212, 0.3)' : 'rgba(15, 23, 42, 0.7)'),
+                        border: isSelected
                           ? '2px solid #38bdf8'
-                          : isSelected
-                            ? '1.5px solid #a855f7'
+                          : isActive
+                            ? '1.5px solid rgba(56, 189, 248, 0.7)'
                             : isSlide
                               ? '1px solid rgba(139, 92, 246, 0.5)'
                               : isImage
                                 ? '1px solid rgba(16, 185, 129, 0.45)'
                                 : '1px solid rgba(255, 255, 255, 0.15)',
-                        boxShadow: isActive ? '0 0 10px rgba(56, 189, 248, 0.65)' : 'none',
+                        boxShadow: isSelected ? '0 0 10px rgba(56, 189, 248, 0.7)' : isActive ? '0 0 6px rgba(56, 189, 248, 0.4)' : 'none',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
                         padding: '0 6px',
                         boxSizing: 'border-box',
                         overflow: 'hidden',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                        zIndex: isActive ? 6 : 4
+                        cursor: activeClipDragId === clip.id ? 'grabbing' : 'grab',
+                        transition: activeClipDragId === clip.id ? 'none' : 'all 0.15s ease',
+                        userSelect: 'none',
+                        zIndex: isSelected ? 8 : (isActive ? 6 : 4)
                       }}
-                      title={`${clip.video?.title || 'Clip'} (${offset.duration.toFixed(1)}s) - Cliquez pour sélectionner`}
+                      title={`[Piste 1] ${clip.video?.title || 'Clip'} (${offset.duration.toFixed(1)}s) - Glisser pour déplacer / ajuster chevauchement`}
                     >
+                      {/* Left Resize / Trim Handle */}
+                      <div
+                        className="timeline-resize-handle timeline-resize-handle-left"
+                        onPointerDown={(e) => handleStartClipDrag(e, clip.id, 'resize-left', videoLaneRef.current)}
+                        onPointerMove={handleClipPointerMove}
+                        onPointerUp={handleClipPointerUp}
+                        title="Ajuster le début / chevauchement"
+                      />
+
                       {/* Left: Badge + Title */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
                         <span style={{
                           fontSize: '8px',
                           fontWeight: 800,
@@ -6099,23 +7188,37 @@ export function VideoEditorStudio() {
                           backgroundColor: isSlide ? 'rgba(139, 92, 246, 0.4)' : isImage ? 'rgba(16, 185, 129, 0.4)' : 'rgba(6, 182, 212, 0.3)',
                           color: isSlide ? '#c4b5fd' : isImage ? '#6ee7b7' : '#7dd3fc'
                         }}>
-                          {isSlide ? '📑 Diapo' : isImage ? '🖼️ Image' : '🎬 Vidéo'}
+                          {isSlide ? '📑 Diapo' : isImage ? '🖼️ Image' : '🎬 V1'}
                         </span>
                         <span style={{ fontSize: '9px', fontWeight: 600, color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {clip.video?.title || 'Clip'}
                         </span>
                       </div>
 
-                      {/* Right: Duration + Edit for Slide */}
+                      {/* Right: Duration + Shuttle to V2 + Edit */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
-                        <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.75)', fontFamily: 'monospace' }}>
+                        <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.75)', fontFamily: 'monospace', pointerEvents: 'none' }}>
                           {offset.duration.toFixed(1)}s
                         </span>
+                        <button
+                          type="button"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleClipTrack(clip.id, 2);
+                          }}
+                          style={{ background: 'rgba(168, 85, 247, 0.25)', border: '1px solid rgba(168, 85, 247, 0.45)', borderRadius: '3px', color: '#c084fc', cursor: 'pointer', padding: '1px 4px', fontSize: '8px', fontWeight: 700 }}
+                          title="Faire monter ce clip sur la Piste Vidéo 2 (V2)"
+                        >
+                          ⬆️ V2
+                        </button>
                         {isSlide && (
                           <button
                             type="button"
+                            onPointerDown={(e) => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation();
+                              setSelectedClipId(clip.id);
                               openEditSlideModal(clip);
                             }}
                             style={{ background: 'transparent', border: 'none', color: '#c084fc', cursor: 'pointer', padding: '1px', fontSize: '9px' }}
@@ -6125,6 +7228,15 @@ export function VideoEditorStudio() {
                           </button>
                         )}
                       </div>
+
+                      {/* Right Resize / Trim Handle */}
+                      <div
+                        className="timeline-resize-handle timeline-resize-handle-right"
+                        onPointerDown={(e) => handleStartClipDrag(e, clip.id, 'resize-right', videoLaneRef.current)}
+                        onPointerMove={handleClipPointerMove}
+                        onPointerUp={handleClipPointerUp}
+                        title="Ajuster la fin / durée"
+                      />
                     </div>
                   );
                 })}
@@ -6137,9 +7249,9 @@ export function VideoEditorStudio() {
                   />
                 )}
 
-                {(!project.clips || project.clips.length === 0) && (
+                {(!project.clips || project.clips.filter(c => c.track !== 2).length === 0) && (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', fontSize: '10px', color: 'var(--text-muted)' }}>
-                    Aucun clip vidéo. Cliquez sur le « + » d'une vidéo dans le Chutier pour l'ajouter.
+                    Piste Vidéo 1 vide — Cliquez sur « + Vidéo » pour ajouter un clip ou descendez-en un avec « ⬇️ V1 ».
                   </div>
                 )}
               </div>
@@ -6153,30 +7265,41 @@ export function VideoEditorStudio() {
                   const isSlide = clip.type === 'slide';
                   const isImage = clip.type === 'image';
                   const isActive = currentTime >= offset.start && currentTime <= offset.end;
+                  const isSelected = selectedClipId === clip.id;
 
                   return (
                     <div key={clip.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <div
+                        onClick={() => {
+                          setSelectedClipId(clip.id);
+                          setSelectedElement({ type: 'clip', id: clip.id });
+                          handleSeek(offset.start);
+                        }}
                         style={{
                           display: 'flex',
                           flexDirection: 'column',
                           gap: '4px',
                           padding: '6px 8px',
+                          cursor: 'pointer',
                           backgroundColor: isSlide
-                            ? (isActive ? 'rgba(139, 92, 246, 0.25)' : 'rgba(139, 92, 246, 0.12)')
+                            ? (isSelected ? 'rgba(139, 92, 246, 0.35)' : isActive ? 'rgba(139, 92, 246, 0.25)' : 'rgba(139, 92, 246, 0.12)')
                             : isImage
-                              ? (isActive ? 'rgba(16, 185, 129, 0.22)' : 'rgba(16, 185, 129, 0.1)')
-                              : isActive
-                                ? 'rgba(6, 182, 212, 0.15)'
-                                : (clip.playbackSpeed || 1.0) > 1 ? 'rgba(245, 158, 11, 0.08)' : 'rgba(255,255,255,0.04)',
-                          border: isActive
+                              ? (isSelected ? 'rgba(16, 185, 129, 0.35)' : isActive ? 'rgba(16, 185, 129, 0.22)' : 'rgba(16, 185, 129, 0.1)')
+                              : isSelected
+                                ? 'rgba(6, 182, 212, 0.25)'
+                                : isActive
+                                  ? 'rgba(6, 182, 212, 0.15)'
+                                  : (clip.playbackSpeed || 1.0) > 1 ? 'rgba(245, 158, 11, 0.08)' : 'rgba(255,255,255,0.04)',
+                          border: isSelected
                             ? '2px solid #38bdf8'
-                            : isSlide
-                              ? '1px solid rgba(139, 92, 246, 0.5)'
-                              : isImage
-                                ? '1px solid rgba(16, 185, 129, 0.45)'
-                                : (clip.playbackSpeed || 1.0) > 1 ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid var(--border-color)',
-                          boxShadow: isActive ? '0 0 10px rgba(56, 189, 248, 0.6)' : 'none',
+                            : isActive
+                              ? '1.5px solid rgba(56, 189, 248, 0.7)'
+                              : isSlide
+                                ? '1px solid rgba(139, 92, 246, 0.5)'
+                                : isImage
+                                  ? '1px solid rgba(16, 185, 129, 0.45)'
+                                  : (clip.playbackSpeed || 1.0) > 1 ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid var(--border-color)',
+                          boxShadow: isSelected ? '0 0 10px rgba(56, 189, 248, 0.6)' : isActive ? '0 0 6px rgba(56, 189, 248, 0.4)' : 'none',
                           borderRadius: '6px',
                           minWidth: timelineViewMode === 'filmstrip' ? '300px' : '185px',
                           transition: 'all 0.15s ease'
@@ -6185,6 +7308,17 @@ export function VideoEditorStudio() {
                         {/* Top Row: Title + Badges + Edit/Delete */}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden' }}>
+                            <span style={{
+                              fontSize: '8px',
+                              fontWeight: 800,
+                              color: clip.track === 2 ? '#c084fc' : '#38bdf8',
+                              backgroundColor: clip.track === 2 ? 'rgba(168, 85, 247, 0.25)' : 'rgba(6, 182, 212, 0.25)',
+                              padding: '1px 4px',
+                              borderRadius: '3px',
+                              border: `1px solid ${clip.track === 2 ? 'rgba(168, 85, 247, 0.5)' : 'rgba(6, 182, 212, 0.5)'}`
+                            }}>
+                              {clip.track === 2 ? 'V2' : 'V1'}
+                            </span>
                             {isSlide && (
                               <span style={{
                                 fontSize: '8px',
@@ -6232,6 +7366,26 @@ export function VideoEditorStudio() {
                             <span style={{ color: isSlide ? '#c4b5fd' : isImage ? '#6ee7b7' : (clip.playbackSpeed || 1.0) > 1 ? '#fde68a' : 'var(--text-secondary)', fontSize: '9px', fontWeight: 600 }}>
                               {((((clip.endTrim ?? 10) - (clip.startTrim ?? 0)) / (clip.playbackSpeed || 1.0))).toFixed(1)}s
                             </span>
+                            <button
+                              type="button"
+                              style={{
+                                background: clip.track === 2 ? 'rgba(6, 182, 212, 0.2)' : 'rgba(168, 85, 247, 0.2)',
+                                border: `1px solid ${clip.track === 2 ? 'rgba(6, 182, 212, 0.5)' : 'rgba(168, 85, 247, 0.5)'}`,
+                                color: clip.track === 2 ? '#38bdf8' : '#c084fc',
+                                cursor: 'pointer',
+                                padding: '1px 4px',
+                                fontSize: '8px',
+                                borderRadius: '3px',
+                                fontWeight: 700
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleClipTrack(clip.id);
+                              }}
+                              title={clip.track === 2 ? 'Faire descendre sur la Piste Vidéo 1 (V1)' : 'Faire monter sur la Piste Vidéo 2 (V2)'}
+                            >
+                              {clip.track === 2 ? '⬇️ V1' : '⬆️ V2'}
+                            </button>
                             {isSlide && (
                               <button
                                 style={{ background: 'transparent', border: 'none', color: '#c084fc', cursor: 'pointer', padding: 0, fontSize: '10px' }}
@@ -6496,6 +7650,29 @@ export function VideoEditorStudio() {
                               >
                                 <Scissors size={9} /> Silences
                               </button>
+
+                              {/* Audio Volume Slider */}
+                              {clip.type !== 'slide' && clip.type !== 'image' && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '3px', marginLeft: 'auto' }} title="Volume audio du clip">
+                                  {(clip.volume === 0) ? (
+                                    <VolumeX size={10} color="var(--text-muted)" style={{ cursor: 'pointer' }} onClick={() => updateClipVolume(clip.id, 1.0)} />
+                                  ) : (
+                                    <Volume2 size={10} color={clip.track === 2 ? '#38bdf8' : '#a855f7'} style={{ cursor: 'pointer' }} onClick={() => updateClipVolume(clip.id, 0)} />
+                                  )}
+                                  <input
+                                    type="range"
+                                    min="0"
+                                    max="1"
+                                    step="0.05"
+                                    value={clip.volume !== undefined ? clip.volume : 1.0}
+                                    onChange={(e) => updateClipVolume(clip.id, parseFloat(e.target.value))}
+                                    style={{ width: '36px', height: '4px', accentColor: clip.track === 2 ? '#38bdf8' : '#a855f7', cursor: 'pointer' }}
+                                  />
+                                  <span style={{ fontSize: '8px', color: 'var(--text-muted)', minWidth: '18px' }}>
+                                    {Math.round((clip.volume !== undefined ? clip.volume : 1.0) * 100)}%
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           </>
                         )}
@@ -6560,11 +7737,11 @@ export function VideoEditorStudio() {
                         fontWeight: 800,
                         padding: '1px 5px',
                         borderRadius: '3px',
-                        backgroundColor: isSlide ? 'rgba(139, 92, 246, 0.35)' : isImage ? 'rgba(16, 185, 129, 0.35)' : 'rgba(6, 182, 212, 0.25)',
-                        color: isSlide ? '#c4b5fd' : isImage ? '#6ee7b7' : '#7dd3fc',
-                        border: `1px solid ${isSlide ? '#8b5cf6' : isImage ? '#10b981' : '#06b6d4'}`
+                        backgroundColor: isSlide ? 'rgba(139, 92, 246, 0.35)' : isImage ? 'rgba(16, 185, 129, 0.35)' : (clip.track === 2 ? 'rgba(168, 85, 247, 0.35)' : 'rgba(6, 182, 212, 0.25)'),
+                        color: isSlide ? '#c4b5fd' : isImage ? '#6ee7b7' : (clip.track === 2 ? '#e9d5ff' : '#7dd3fc'),
+                        border: `1px solid ${isSlide ? '#8b5cf6' : isImage ? '#10b981' : (clip.track === 2 ? '#a855f7' : '#06b6d4')}`
                       }}>
-                        {isSlide ? '📑 Diapo Titre' : isImage ? '🖼️ Diapo Image' : `🎬 Clip #${idx + 1}`}
+                        {isSlide ? '📑 Diapo Titre' : isImage ? '🖼️ Diapo Image' : `🎬 Clip #${idx + 1} (${clip.track === 2 ? 'Piste V2' : 'Piste V1'})`}
                       </span>
                       <span style={{ fontSize: '11px', fontWeight: 600, color: '#f8fafc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '200px' }}>
                         {clip.video?.title || 'Clip'}
@@ -6575,6 +7752,26 @@ export function VideoEditorStudio() {
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <button
+                        type="button"
+                        className="btn-toolbar"
+                        style={{
+                          padding: '2px 8px',
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          backgroundColor: clip.track === 2 ? 'rgba(6, 182, 212, 0.2)' : 'rgba(168, 85, 247, 0.2)',
+                          color: clip.track === 2 ? '#38bdf8' : '#c084fc',
+                          borderColor: clip.track === 2 ? 'rgba(6, 182, 212, 0.5)' : 'rgba(168, 85, 247, 0.5)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          marginRight: '2px'
+                        }}
+                        onClick={() => toggleClipTrack(clip.id)}
+                        title={clip.track === 2 ? 'Faire descendre ce clip sur la Piste Vidéo 1 (V1)' : 'Faire monter ce clip sur la Piste Vidéo 2 (V2)'}
+                      >
+                        {clip.track === 2 ? '⬇️ Piste 1 (V1)' : '⬆️ Piste 2 (V2)'}
+                      </button>
                       <button
                         type="button"
                         className="btn-toolbar"
@@ -6747,6 +7944,30 @@ export function VideoEditorStudio() {
                         >
                           <Scissors size={10} /> Supprimer les Silences
                         </button>
+
+                        {/* Audio Volume */}
+                        {clip.type !== 'slide' && clip.type !== 'image' && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px' }} title="Volume audio du clip">
+                            <span style={{ color: 'var(--text-secondary)' }}>Volume :</span>
+                            {(clip.volume === 0) ? (
+                              <VolumeX size={12} color="var(--text-muted)" style={{ cursor: 'pointer' }} onClick={() => updateClipVolume(clip.id, 1.0)} />
+                            ) : (
+                              <Volume2 size={12} color={clip.track === 2 ? '#38bdf8' : '#a855f7'} style={{ cursor: 'pointer' }} onClick={() => updateClipVolume(clip.id, 0)} />
+                            )}
+                            <input
+                              type="range"
+                              min="0"
+                              max="1"
+                              step="0.05"
+                              value={clip.volume !== undefined ? clip.volume : 1.0}
+                              onChange={(e) => updateClipVolume(clip.id, parseFloat(e.target.value))}
+                              style={{ width: '50px', accentColor: clip.track === 2 ? '#38bdf8' : '#a855f7', cursor: 'pointer' }}
+                            />
+                            <span style={{ fontSize: '9px', color: 'var(--text-muted)', minWidth: '24px' }}>
+                              {Math.round((clip.volume !== undefined ? clip.volume : 1.0) * 100)}%
+                            </span>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -6801,6 +8022,11 @@ export function VideoEditorStudio() {
             text: '#ffffff',
             badgeColor: '#fda4af'
           }}
+          selectedItemId={selectedElement?.type === 'voiceover' ? selectedElement.id : null}
+          onSelect={(id) => {
+            setSelectedElement({ type: 'voiceover', id });
+            setSelectedClipId(null);
+          }}
           onUpdateTiming={updateVoiceoverTiming}
           onSeek={handleSeek}
           onEdit={(id) => {
@@ -6838,6 +8064,11 @@ export function VideoEditorStudio() {
             text: '#ffffff',
             badgeColor: '#c084fc'
           }}
+          selectedItemId={selectedElement?.type === 'title' ? selectedElement.id : null}
+          onSelect={(id) => {
+            setSelectedElement({ type: 'title', id });
+            setSelectedClipId(null);
+          }}
           onUpdateTiming={updateTitleTiming}
           onSeek={handleSeek}
           onEdit={(id) => {
@@ -6869,6 +8100,11 @@ export function VideoEditorStudio() {
             text: '#ffffff',
             badgeColor: '#a7f3d0'
           }}
+          selectedItemId={selectedElement?.type === 'image' ? selectedElement.id : null}
+          onSelect={(id) => {
+            setSelectedElement({ type: 'image', id });
+            setSelectedClipId(null);
+          }}
           onUpdateTiming={updateImageTiming}
           onSeek={handleSeek}
           onEdit={(id) => {
@@ -6899,6 +8135,11 @@ export function VideoEditorStudio() {
             text: '#ffffff',
             badgeColor: '#fde68a'
           }}
+          selectedItemId={selectedElement?.type === 'zoom' ? selectedElement.id : null}
+          onSelect={(id) => {
+            setSelectedElement({ type: 'zoom', id });
+            setSelectedClipId(null);
+          }}
           onUpdateTiming={updateZoomTiming}
           onSeek={handleSeek}
           onEdit={(id) => {
@@ -6911,7 +8152,7 @@ export function VideoEditorStudio() {
 
         {/* Track 5: Background Music & Audio Ducking */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'rgba(0,0,0,0.25)', padding: '6px 8px', borderRadius: '5px' }}>
-          <span style={{ fontSize: '10px', width: '160px', minWidth: '160px', maxWidth: '160px', flexShrink: 0, color: '#38bdf8', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px', boxSizing: 'border-box', paddingRight: '8px' }}>
+          <span className="timeline-track-sticky-header" style={{ fontSize: '10px', width: '160px', minWidth: '160px', maxWidth: '160px', flexShrink: 0, color: '#38bdf8', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px', boxSizing: 'border-box', paddingRight: '8px' }}>
             <Music size={11} />
             Musique de Fond
           </span>
@@ -6999,7 +8240,7 @@ export function VideoEditorStudio() {
 
         {/* Track 6: YouTube Chapters */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'rgba(0,0,0,0.25)', padding: '5px 8px', borderRadius: '5px' }}>
-          <span style={{ fontSize: '10px', width: '105px', flexShrink: 0, color: '#38bdf8', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span className="timeline-track-sticky-header" style={{ fontSize: '10px', width: '160px', minWidth: '160px', maxWidth: '160px', flexShrink: 0, color: '#38bdf8', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px', boxSizing: 'border-box', paddingRight: '8px' }}>
             <ListTree size={11} color="#38bdf8" />
             Chapitres ({(project.chapters || []).length})
           </span>
@@ -7041,6 +8282,8 @@ export function VideoEditorStudio() {
                 Aucun chapitre défini. Cliquez sur « 📑 Chapitres » dans la barre de contrôle pour les générer automatiquement.
               </span>
             )}
+          </div>
+        </div>
           </div>
         </div>
       </div>
@@ -7113,15 +8356,18 @@ export function VideoEditorStudio() {
       {/* Title / Text Modal */}
       {isTitleModalOpen && (
         <div className="modal-overlay" onClick={() => setIsTitleModalOpen(false)}>
-          <div className="glass-panel modal-content" style={{ maxWidth: '400px', padding: '14px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="glass-panel modal-content" style={{ maxWidth: '440px', padding: '16px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title" style={{ fontSize: '14px' }}>Ajouter un Titre / Carton</h3>
+              <h3 className="modal-title" style={{ fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px', color: '#c084fc' }}>
+                <Type size={16} />
+                {titleForm.id ? 'Modifier le Titre / Carton' : 'Ajouter un Titre / Carton'}
+              </h3>
               <button className="close-btn" onClick={() => setIsTitleModalOpen(false)}>
                 <X size={15} />
               </button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '4px' }}>
               <div>
                 <label style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Texte principal</label>
                 <input
@@ -7129,7 +8375,9 @@ export function VideoEditorStudio() {
                   className="form-input"
                   value={titleForm.text}
                   onChange={(e) => setTitleForm({ ...titleForm, text: e.target.value })}
-                  style={{ width: '100%', fontSize: '12px', padding: '4px 6px' }}
+                  placeholder="ex: Bienvenue sur le tutoriel, Étape 1..."
+                  style={{ width: '100%', fontSize: '12px', padding: '5px 8px', fontWeight: 600 }}
+                  autoFocus
                 />
               </div>
 
@@ -7140,13 +8388,97 @@ export function VideoEditorStudio() {
                   className="form-input"
                   value={titleForm.subtitle || ''}
                   onChange={(e) => setTitleForm({ ...titleForm, subtitle: e.target.value })}
-                  style={{ width: '100%', fontSize: '12px', padding: '4px 6px' }}
+                  placeholder="ex: Sous-titre ou explication secondaire..."
+                  style={{ width: '100%', fontSize: '12px', padding: '5px 8px' }}
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              {/* Disposition / Style de Titre */}
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', display: 'block' }}>
+                  Style de disposition
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
+                  {[
+                    { id: 'lowerthird', label: '🎬 Bandeau Inférieur', desc: 'Bas-gauche + barre violette (safe webcam)' },
+                    { id: 'pill', label: '💊 Pilule Screen Studio', desc: 'Capsule moderne + puce lumineuse' },
+                    { id: 'badge', label: '🏷️ Encart Haut-Gauche', desc: 'Badge tag pour astuce / raccourci' },
+                    { id: 'center-card', label: '🔲 Cartouche Glass', desc: 'Boîte centrale avec flou & glow' },
+                    { id: 'cinema', label: '🎞️ Cinéma Épuré', desc: 'Dégradé d\'ambiance sans boîte' },
+                    { id: 'intro', label: '🚀 Plein Écran Intro', desc: 'Carton d\'ouverture de vidéo' },
+                    { id: 'outro', label: '🏁 Plein Écran Outro', desc: 'Carton de fin & remerciements' }
+                  ].map((st) => (
+                    <button
+                      key={st.id}
+                      type="button"
+                      onClick={() => setTitleForm({ ...titleForm, style: st.id as any })}
+                      style={{
+                        padding: '6px 8px',
+                        borderRadius: '6px',
+                        fontSize: '11px',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '2px',
+                        backgroundColor: titleForm.style === st.id ? 'rgba(192, 132, 252, 0.22)' : 'rgba(255,255,255,0.04)',
+                        border: titleForm.style === st.id ? '1.5px solid #c084fc' : '1px solid rgba(255,255,255,0.1)',
+                        color: titleForm.style === st.id ? '#ffffff' : 'var(--text-secondary)',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <span style={{ fontWeight: 700, color: titleForm.style === st.id ? '#c084fc' : '#ffffff' }}>{st.label}</span>
+                      <span style={{ fontSize: '9px', color: 'var(--text-muted)', lineHeight: '1.2' }}>{st.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Forme d'Apparition / Animation */}
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', display: 'block' }}>
+                  Forme d'apparition (Animation)
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '5px' }}>
+                  {[
+                    { id: 'slide-up', label: '⬆️ Gliss. Haut', desc: 'Montée fluide' },
+                    { id: 'slide-left', label: '➡️ Gliss. Gauche', desc: 'Arrivée latérale' },
+                    { id: 'zoom-in', label: '🔍 Zoom Avant', desc: 'Échelle progressive' },
+                    { id: 'pop-bounce', label: '💥 Rebond Pop', desc: 'Effet punchy & spring' },
+                    { id: 'typewriter', label: '⌨️ Écriture', desc: 'Lettre par lettre' },
+                    { id: 'fade', label: '🌫️ Fondu Doux', desc: 'Par transparence' }
+                  ].map((an) => (
+                    <button
+                      key={an.id}
+                      type="button"
+                      onClick={() => setTitleForm({ ...titleForm, animation: an.id as any })}
+                      style={{
+                        padding: '5px 6px',
+                        borderRadius: '5px',
+                        fontSize: '10px',
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '1px',
+                        backgroundColor: (titleForm.animation || 'slide-up') === an.id ? 'rgba(56, 189, 248, 0.22)' : 'rgba(255,255,255,0.04)',
+                        border: (titleForm.animation || 'slide-up') === an.id ? '1.5px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
+                        color: (titleForm.animation || 'slide-up') === an.id ? '#ffffff' : 'var(--text-secondary)',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <span style={{ fontWeight: 700, color: (titleForm.animation || 'slide-up') === an.id ? '#38bdf8' : '#ffffff' }}>{an.label}</span>
+                      <span style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>{an.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Timing & Police */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', alignItems: 'end' }}>
                 <div>
-                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Début (s)</label>
+                  <label style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Début (s)</label>
                   <input
                     type="number"
                     min={0}
@@ -7154,41 +8486,73 @@ export function VideoEditorStudio() {
                     className="form-input"
                     value={titleForm.startTime}
                     onChange={(e) => setTitleForm({ ...titleForm, startTime: parseFloat(e.target.value) || 0 })}
-                    style={{ width: '100%', fontSize: '11px', padding: '3px 5px' }}
+                    style={{ width: '100%', fontSize: '11px', padding: '4px 6px' }}
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Durée (s)</label>
+                  <label style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Durée (s)</label>
                   <input
                     type="number"
-                    min={1}
-                    max={10}
+                    min={0.5}
+                    max={30}
                     step={0.5}
                     className="form-input"
                     value={titleForm.duration}
                     onChange={(e) => setTitleForm({ ...titleForm, duration: parseFloat(e.target.value) || 3 })}
-                    style={{ width: '100%', fontSize: '11px', padding: '3px 5px' }}
+                    style={{ width: '100%', fontSize: '11px', padding: '4px 6px' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Taille texte</label>
+                  <select
+                    className="form-input"
+                    value={titleForm.fontSize}
+                    onChange={(e) => setTitleForm({ ...titleForm, fontSize: parseInt(e.target.value, 10) || 28 })}
+                    style={{ width: '100%', fontSize: '11px', padding: '4px 6px' }}
+                  >
+                    <option value={22}>22px (Discret)</option>
+                    <option value={28}>28px (Standard)</option>
+                    <option value={36}>36px (Moyen)</option>
+                    <option value={44}>44px (Grand)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Couleurs rapides */}
+              <div>
+                <label style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '3px', display: 'block' }}>Couleur du texte</label>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  {['#ffffff', '#fde68a', '#38bdf8', '#c084fc', '#34d399', '#f87171'].map((col) => (
+                    <button
+                      key={col}
+                      type="button"
+                      onClick={() => setTitleForm({ ...titleForm, textColor: col })}
+                      style={{
+                        width: '20px',
+                        height: '20px',
+                        borderRadius: '50%',
+                        backgroundColor: col,
+                        border: titleForm.textColor === col ? '2px solid #ffffff' : '1px solid rgba(255,255,255,0.2)',
+                        boxShadow: titleForm.textColor === col ? '0 0 6px rgba(255,255,255,0.8)' : 'none',
+                        cursor: 'pointer'
+                      }}
+                    />
+                  ))}
+                  <input
+                    type="color"
+                    value={titleForm.textColor || '#ffffff'}
+                    onChange={(e) => setTitleForm({ ...titleForm, textColor: e.target.value })}
+                    style={{ width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}
+                    title="Choisir une couleur personnalisée"
                   />
                 </div>
               </div>
 
-              <div>
-                <label style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Disposition</label>
-                <select
-                  className="form-input"
-                  value={titleForm.style}
-                  onChange={(e) => setTitleForm({ ...titleForm, style: e.target.value as any })}
-                  style={{ width: '100%', fontSize: '11px', padding: '3px 5px' }}
-                >
-                  <option value="lowerthird">Bandeau inférieur (Lower Third)</option>
-                  <option value="intro">Plein écran (Intro / Chapitre)</option>
-                  <option value="outro">Plein écran (Outro / Fin)</option>
-                </select>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', marginTop: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '10px' }}>
                 <button className="action-btn" onClick={() => setIsTitleModalOpen(false)}>Annuler</button>
-                <button className="btn-primary" onClick={handleSaveTitle}>Valider le titre</button>
+                <button className="btn-primary" onClick={handleSaveTitle} style={{ padding: '6px 16px', fontWeight: 700 }}>
+                  Valider le titre
+                </button>
               </div>
             </div>
           </div>
