@@ -71,6 +71,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
   const [recordingTime, setRecordingTime] = useState(0);
   const recordingStartTimeRef = useRef<number>(0);
   const accumulatedTimeRef = useRef<number>(0);
+  const sessionDurationSecRef = useRef<number>(0);
   const [micLevel, setMicLevel] = useState(0);
   const [countdown, setCountdown] = useState<number | null>(null);
   const countdownTimerRef = useRef<number | null>(null);
@@ -1021,6 +1022,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
   const startRecording = async () => {
     try {
       chunksRef.current = [];
+      sessionDurationSecRef.current = 0;
       setRecordingTime(0);
       hasLoggedCompositeErrorRef.current = false;
 
@@ -1484,6 +1486,7 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
           setTimeout(() => {
             try {
               chunksRef.current = [];
+              sessionDurationSecRef.current = 0;
               recordingStartTimeRef.current = Date.now();
               accumulatedTimeRef.current = 0;
               setRecordingTime(0);
@@ -1661,9 +1664,13 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     let totalElapsedMs = accumulatedTimeRef.current;
     if (recordingStartTimeRef.current > 0) {
       totalElapsedMs += (Date.now() - recordingStartTimeRef.current);
-      recordingStartTimeRef.current = 0;
     }
-    const recordedDuration = Math.max(recordingTime, Math.round(totalElapsedMs / 1000));
+    const finalElapsedSec = Math.max(1, Math.round(totalElapsedMs / 1000));
+    sessionDurationSecRef.current = finalElapsedSec;
+    recordingStartTimeRef.current = 0;
+    accumulatedTimeRef.current = 0;
+    setRecordingTime(0);
+    const recordedDuration = finalElapsedSec;
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
@@ -1744,15 +1751,10 @@ export function useRecorder(options: RecorderOptions, onSaveComplete?: () => voi
     const videoBlob = new Blob(chunksRef.current, { type: mediaRecorderRef.current?.mimeType || 'video/webm' });
     chunksRef.current = []; // Free individual chunk buffers immediately
 
-    let finalDuration = recordingTime;
-    let totalElapsedMs = accumulatedTimeRef.current;
-    if (recordingStartTimeRef.current > 0) {
-      totalElapsedMs += (Date.now() - recordingStartTimeRef.current);
-    }
-    const elapsedSec = Math.round(totalElapsedMs / 1000);
-    if (elapsedSec > finalDuration) {
-      finalDuration = elapsedSec;
-    }
+    const finalDuration = sessionDurationSecRef.current > 0
+      ? sessionDurationSecRef.current
+      : (recordingTime > 0 ? recordingTime : 1);
+    sessionDurationSecRef.current = 0;
 
     // Fix WebM missing duration header instantly via chunked 64KB EBML patch (< 1ms, zero IPC, 0 memory overhead)
     let finalBlob = videoBlob;
