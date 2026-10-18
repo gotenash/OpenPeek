@@ -1,4 +1,4 @@
-import { Component, type ReactNode, type ErrorInfo, useState } from 'react';
+import { useState } from 'react';
 import { useRecorder, type RecorderOptions } from './hooks/useRecorder';
 import { RecorderDashboard } from './components/RecorderDashboard';
 import { VideoLibrary } from './components/VideoLibrary';
@@ -7,6 +7,8 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { OverlayCanvas } from './components/OverlayCanvas';
 import { VideoEditorStudio } from './components/VideoEditorStudio';
 import { TeleprompterModal } from './components/TeleprompterModal';
+import { StudioErrorBoundary } from './components/StudioErrorBoundary';
+import { DEFAULT_RECORDER_OPTIONS } from './utils/recorder/defaultOptions';
 import { I18nProvider, useI18n } from './i18n/I18nContext';
 import { 
   Video, 
@@ -21,92 +23,6 @@ import {
 import './App.css';
 import { APP_VERSION } from './version.ts';
 
-interface ErrorBoundaryProps {
-  children: ReactNode;
-  fallbackTitle?: string;
-}
-
-interface ErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-}
-
-export class StudioErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("StudioErrorBoundary caught an error:", error, errorInfo);
-  }
-
-  handleReset = () => {
-    this.setState({ hasError: false, error: null });
-  };
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minHeight: '380px',
-          padding: '30px',
-          backgroundColor: 'rgba(15, 23, 42, 0.95)',
-          border: '1px solid rgba(239, 68, 68, 0.4)',
-          borderRadius: '12px',
-          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.85), 0 0 30px rgba(239, 68, 68, 0.2)',
-          color: '#f8fafc',
-          textAlign: 'center',
-          margin: '20px'
-        }}>
-          <div style={{ fontSize: '32px', marginBottom: '12px' }}>⚠️</div>
-          <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#f87171', marginBottom: '8px' }}>
-            {this.props.fallbackTitle || "Une anomalie est survenue dans le Studio de Montage"}
-          </h2>
-          <p style={{ fontSize: '13px', color: '#94a3b8', maxWidth: '560px', marginBottom: '16px', lineHeight: 1.5 }}>
-            Une erreur d'affichage a été interceptée afin d'éviter la fermeture ou l'écran vide de l'application.
-          </p>
-          <div style={{
-            width: '100%',
-            maxWidth: '620px',
-            backgroundColor: 'rgba(0, 0, 0, 0.6)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            borderRadius: '6px',
-            padding: '12px',
-            textAlign: 'left',
-            fontFamily: 'monospace',
-            fontSize: '11px',
-            color: '#fca5a5',
-            maxHeight: '140px',
-            overflowY: 'auto',
-            marginBottom: '20px',
-            wordBreak: 'break-word',
-            whiteSpace: 'pre-wrap'
-          }}>
-            {this.state.error?.message || String(this.state.error)}
-          </div>
-          <button
-            onClick={this.handleReset}
-            className="btn-primary"
-            style={{ padding: '8px 20px', fontSize: '13px' }}
-          >
-            🔄 Réessayer
-          </button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
 function MainApp() {
   const { t, language, setLanguage } = useI18n();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'whiteboard' | 'library' | 'editor' | 'settings'>('dashboard');
@@ -114,44 +30,7 @@ function MainApp() {
   const [isTeleprompterOpen, setIsTeleprompterOpen] = useState(false);
 
   // Recorder configurations state
-  const [options, setOptions] = useState<RecorderOptions>({
-    resolution: '1080p',
-    frameRate: 60,
-    codec: 'video/webm;codecs=h264',
-    recordMic: true,
-    recordSystemAudio: false,
-    enableNoiseSuppression: true,
-    enableVocalEnhancer: true,
-    micGain: 1.15,
-    showWebcam: false,
-    webcamShape: 'circle',
-    webcamHaloColor: '#8b5cf6',
-    webcamMirrorMode: true,
-    webcamGlow: true,
-    webcamBackgroundEffect: 'none',
-    webcamVirtualBg: 'transparent',
-    webcamCustomBgImage: '',
-    showMouseClicks: true,
-    enableAutoZoom: false,
-    autoZoomFactor: 1.75,
-    autoZoomDuration: 2.8,
-    selectedMicId: '',
-    selectedCamId: '',
-    enableSecondaryCam: false,
-    selectedSecondaryCamId: '',
-    secondaryCamAudio: true,
-    secondaryCamShortcut: 'F10',
-    captureSourcePreference: 'screen',
-    zoomSoundFeedback: true,
-    zoomToastFeedback: true,
-    zoomCornerIndicator: true,
-    enableCinematicCursor: true,
-    cursorSize: 'large',
-    cursorSmoothingSpeed: 'cinematic',
-    enableKeystrokeHUD: true,
-    keystrokeHUDPosition: 'bottom-center',
-    selectedMonitorId: 'prompt'
-  });
+  const [options, setOptions] = useState<RecorderOptions>(DEFAULT_RECORDER_OPTIONS);
 
   // Load saved screen preference on startup
   useState(() => {
