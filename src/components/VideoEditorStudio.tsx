@@ -40,7 +40,7 @@ import {
   FileText, Upload, RefreshCw, Music, Volume2, VolumeX, Headphones, Mic,
   Scissors, FastForward, ZoomIn, ZoomOut, Crosshair, Image as ImageIcon,
   ListTree, Bookmark, Copy, BookOpen, Maximize2, Minimize2,
-  Undo2, Redo2
+  Undo2, Redo2, Zap
 } from 'lucide-react';
 import { importSingleFile } from '../utils/mediaImporter';
 import { GifExportModal } from './GifExportModal';
@@ -1299,8 +1299,9 @@ export function VideoEditorStudio() {
   const [previewingAudioId, setPreviewingAudioId] = useState<string | null>(null);
   const [generatingPresetId, setGeneratingPresetId] = useState<string | null>(null);
 
-  // Export format preference
+  // Export format & engine preference
   const [exportFormat, setExportFormat] = useState<'mp4' | 'webm'>('mp4');
+  const [exportEngine, setExportEngine] = useState<'auto' | 'turbo' | 'studio'>('auto');
 
   const [_project, _setProject] = useState<EditorProject>({
     clips: [],
@@ -1315,6 +1316,16 @@ export function VideoEditorStudio() {
   const project = _project;
   const projectRef = useRef<EditorProject>(_project);
   projectRef.current = _project;
+
+  const isEligibleForTurbo = useMemo(() => {
+    if (!project || !project.clips || project.clips.length === 0) return false;
+    const hasZooms = (project.zooms || []).length > 0;
+    const hasTitles = (project.titles || []).length > 0;
+    const hasImages = (project.images || []).length > 0;
+    const hasVoiceovers = (project.voiceovers || []).length > 0;
+    const hasSlides = project.clips.some(c => c.type === 'slide');
+    return !hasZooms && !hasTitles && !hasImages && !hasVoiceovers && !hasSlides;
+  }, [project]);
 
   const undoStackRef = useRef<EditorProject[]>([]);
   const redoStackRef = useRef<EditorProject[]>([]);
@@ -1363,6 +1374,8 @@ export function VideoEditorStudio() {
   const [exportCurrentSec, setExportCurrentSec] = useState(0);
   const [exportStatus, setExportStatus] = useState<string>('');
   const [exportedBlob, setExportedBlob] = useState<Blob | null>(null);
+  const [downloadToast, setDownloadToast] = useState<{ visible: boolean; fileName: string } | null>(null);
+  const [isDownloaded, setIsDownloaded] = useState(false);
   const abortExportRef = useRef<boolean>(false);
 
   // Title modal state
@@ -1550,10 +1563,10 @@ export function VideoEditorStudio() {
       if (clip.type === 'image') {
         if (!imagesCacheRef.current.has(clip.id)) {
           const img = new Image();
-          if (clip.video?.thumbnail) {
-            img.src = clip.video.thumbnail;
-          } else if (clip.video?.blob && clip.video.blob.size > 0) {
+          if (clip.video?.blob && clip.video.blob.size > 0) {
             img.src = URL.createObjectURL(clip.video.blob);
+          } else if (clip.video?.thumbnail) {
+            img.src = clip.video.thumbnail;
           }
           img.onload = () => {
             if (!isPlayingRef.current) renderStaticPreviewAt(currentTimeRef.current);
@@ -1718,9 +1731,11 @@ export function VideoEditorStudio() {
 
         if (clip.type === 'image') {
           let cachedImg = imagesCacheRef.current.get(clip.id);
-          if (!cachedImg && (clip.video?.thumbnail || (clip.video?.blob && clip.video.blob.size > 0))) {
+          if (!cachedImg && (clip.video?.blob || clip.video?.thumbnail)) {
             cachedImg = new Image();
-            cachedImg.src = clip.video?.thumbnail || (clip.video?.blob ? URL.createObjectURL(clip.video.blob) : '');
+            cachedImg.src = (clip.video?.blob && clip.video.blob.size > 0)
+              ? URL.createObjectURL(clip.video.blob)
+              : (clip.video?.thumbnail || '');
             await new Promise((res) => { cachedImg!.onload = res; cachedImg!.onerror = res; });
             imagesCacheRef.current.set(clip.id, cachedImg);
           }
@@ -4003,9 +4018,11 @@ export function VideoEditorStudio() {
       drawSlideClip(ctx, clip.slideContent, canvasWidth, canvasHeight);
     } else if (clip.type === 'image') {
       let imgEl = imgCacheMap.get(clip.id);
-      if (!imgEl && (clip.video?.thumbnail || (clip.video?.blob && clip.video.blob.size > 0))) {
+      if (!imgEl && (clip.video?.blob || clip.video?.thumbnail)) {
         imgEl = new Image();
-        imgEl.src = clip.video?.thumbnail || (clip.video?.blob ? URL.createObjectURL(clip.video.blob) : '');
+        imgEl.src = (clip.video?.blob && clip.video.blob.size > 0)
+          ? URL.createObjectURL(clip.video.blob)
+          : (clip.video?.thumbnail || '');
         imgCacheMap.set(clip.id, imgEl);
       }
       if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
@@ -4704,19 +4721,17 @@ export function VideoEditorStudio() {
 
     for (const clip of project.clips) {
       if (clip.type === 'image') {
-        if (!imagesCacheRef.current.has(clip.id)) {
-          const imageEl = new Image();
-          if (clip.video.thumbnail) {
-            imageEl.src = clip.video.thumbnail;
-          } else if (clip.video.blob && clip.video.blob.size > 0) {
-            imageEl.src = URL.createObjectURL(clip.video.blob);
-          }
-          await new Promise((resolve) => {
-            imageEl.onload = resolve;
-            imageEl.onerror = resolve;
-          });
-          imagesCacheRef.current.set(clip.id, imageEl);
+        const imageEl = new Image();
+        if (clip.video?.blob && clip.video.blob.size > 0) {
+          imageEl.src = URL.createObjectURL(clip.video.blob);
+        } else if (clip.video?.thumbnail) {
+          imageEl.src = clip.video.thumbnail;
         }
+        await new Promise((resolve) => {
+          imageEl.onload = resolve;
+          imageEl.onerror = resolve;
+        });
+        imagesCacheRef.current.set(clip.id, imageEl);
       } else if (clip.type === 'slide' && clip.slideContent?.bgImageUrl) {
         const cacheKey = `slide_bg_${clip.id}`;
         if (!imagesCacheRef.current.has(cacheKey)) {
@@ -4729,6 +4744,244 @@ export function VideoEditorStudio() {
           if (clip.slideContent) clip.slideContent.bgImageEl = imageEl;
           imagesCacheRef.current.set(cacheKey, imageEl);
         }
+      }
+    }
+
+    // --- MODE TURBO / HYBRIDE (FFmpeg direct ultra-rapide) ---
+    const willUseTurbo = (exportEngine === 'turbo') || (exportEngine === 'auto' && isEligibleForTurbo);
+
+    if (willUseTurbo && !abortExportRef.current) {
+      try {
+        setExportStatus('Initialisation du moteur Turbo FFmpeg...');
+        setExportProgress(8);
+        const { invoke } = await import('@tauri-apps/api/core');
+        const isFfmpeg = await invoke<boolean>('is_ffmpeg_available').catch(() => false);
+
+        if (isFfmpeg) {
+          setExportStatus('Préparation et transfert des médias vers FFmpeg...');
+          await invoke('cleanup_temp_render_clips').catch(() => {});
+
+          const turboClips: any[] = [];
+          for (let i = 0; i < project.clips.length; i++) {
+            if (abortExportRef.current) return;
+            const clip = project.clips[i];
+            const isImage = clip.type === 'image';
+            setExportStatus(`Préparation des médias (${i + 1}/${project.clips.length}) : ${isImage ? 'Image' : 'Vidéo'}...`);
+            setExportProgress(Math.round(4 + ((i + 1) / project.clips.length) * 11)); // 5% -> 15%
+
+            let filePath: string | null = null;
+            let blob = clip.video?.blob;
+            const targetSize = clip.video?.size || (blob ? blob.size : 0);
+
+            // 1. Accès direct ultra-rapide disque SSD si le fichier source existe déjà dans IndexedDB
+            if (!isImage && targetSize > 0) {
+              try {
+                filePath = await invoke<string | null>('find_clip_disk_path', { size: targetSize });
+                if (filePath) {
+                  console.log(`[Export Turbo] Clip #${i + 1} (${targetSize} octets) localisé directement sur SSD:`, filePath);
+                }
+              } catch (e) {
+                console.warn("[Export Turbo] Erreur lors de la recherche directe sur SSD:", e);
+              }
+            }
+
+            // 2. Si non trouvé ou s'il s'agit d'une image/vignette : transfert vers le dossier temporaire
+            if (!filePath) {
+              const ext = isImage ? 'png' : 'webm';
+              const filename = `clip_${i}_${clip.id}.${ext}`;
+
+              if (!blob || blob.size === 0) {
+                if (isImage && clip.video?.thumbnail) {
+                  const res = await fetch(clip.video.thumbnail);
+                  blob = await res.blob();
+                } else {
+                  throw new Error(`Média introuvable pour le clip #${i + 1}`);
+                }
+              }
+
+              if (blob.size <= 8 * 1024 * 1024) {
+                const arrayBuf = await blob.arrayBuffer();
+                filePath = await invoke<string>(
+                  'save_temp_render_clip',
+                  new Uint8Array(arrayBuf),
+                  { headers: { 'x-filename': filename } }
+                );
+              } else {
+                // Streaming par paquets de 2 Mo pour éviter tout blocage du pont IPC Tauri
+                const CHUNK_SIZE = 2 * 1024 * 1024;
+                const totalChunks = Math.ceil(blob.size / CHUNK_SIZE);
+                for (let c = 0; c < totalChunks; c++) {
+                  if (abortExportRef.current) return;
+                  const pct = Math.round(((c + 1) / totalChunks) * 100);
+                  setExportStatus(`Transfert fragmenté (${i + 1}/${project.clips.length}) : ${pct}%...`);
+                  const start = c * CHUNK_SIZE;
+                  const end = Math.min(blob.size, start + CHUNK_SIZE);
+                  const chunkSlice = blob.slice(start, end);
+                  const chunkBuf = await chunkSlice.arrayBuffer();
+                  filePath = await invoke<string>(
+                    'append_temp_render_chunk',
+                    new Uint8Array(chunkBuf),
+                    {
+                      headers: {
+                        'x-filename': filename,
+                        'x-is-first': c === 0 ? 'true' : 'false'
+                      }
+                    }
+                  );
+                }
+              }
+            }
+
+            const speed = clip.playbackSpeed && clip.playbackSpeed > 0 ? clip.playbackSpeed : 1.0;
+            const startTrim = clip.startTrim || 0;
+            const rawEndTrim = clip.endTrim && clip.endTrim > startTrim ? clip.endTrim : (clip.video?.duration || (startTrim + 5));
+            const duration = Math.max(0.1, (rawEndTrim - startTrim) / speed);
+
+            turboClips.push({
+              file_path: filePath,
+              is_image: isImage,
+              has_audio: !isImage && (clip.volume === undefined || clip.volume > 0),
+              duration: duration,
+              start_trim: startTrim,
+              end_trim: rawEndTrim,
+              transition_to_next: clip.transitionToNext || 'none',
+              transition_duration: clip.transitionDuration || 1.0,
+              volume: clip.volume !== undefined ? clip.volume : 1.0,
+              playback_speed: speed
+            });
+          }
+
+          let bgMusicPath: string | null = null;
+          if (project.backgroundMusic?.blob) {
+            setExportStatus('Préparation de la piste musicale...');
+            const bgBlob = project.backgroundMusic.blob;
+            if (bgBlob.size <= 8 * 1024 * 1024) {
+              const bgBuf = await bgBlob.arrayBuffer();
+              bgMusicPath = await invoke<string>(
+                'save_temp_render_clip',
+                new Uint8Array(bgBuf),
+                { headers: { 'x-filename': 'bg_music.wav' } }
+              );
+            } else {
+              const CHUNK_SIZE = 2 * 1024 * 1024;
+              const totalChunks = Math.ceil(bgBlob.size / CHUNK_SIZE);
+              for (let c = 0; c < totalChunks; c++) {
+                if (abortExportRef.current) return;
+                const start = c * CHUNK_SIZE;
+                const end = Math.min(bgBlob.size, start + CHUNK_SIZE);
+                const chunkSlice = bgBlob.slice(start, end);
+                const chunkBuf = await chunkSlice.arrayBuffer();
+                bgMusicPath = await invoke<string>(
+                  'append_temp_render_chunk',
+                  new Uint8Array(chunkBuf),
+                  {
+                    headers: {
+                      'x-filename': 'bg_music.wav',
+                      'x-is-first': c === 0 ? 'true' : 'false'
+                    }
+                  }
+                );
+              }
+            }
+          }
+
+          if (abortExportRef.current) return;
+
+          // Connect real-time progress listener to FFmpeg stdout streaming
+          let unlistenProgress: (() => void) | null = null;
+          try {
+            const { listen } = await import('@tauri-apps/api/event');
+            unlistenProgress = await listen<{
+              out_time_sec: number;
+              total_duration_sec: number;
+              percent: number;
+              speed: string;
+              fps: number;
+            }>('turbo-ffmpeg-progress', (event) => {
+              if (abortExportRef.current) return;
+              const { out_time_sec, total_duration_sec, percent, speed, fps } = event.payload;
+              // Smoothly map FFmpeg percent (0% -> 100%) to exportProgress (15% -> 96%)
+              const scaledProgress = Math.min(96, Math.max(15, Math.round(15 + (percent / 100) * 81)));
+              setExportProgress(scaledProgress);
+              setExportCurrentSec(out_time_sec);
+              const speedTag = speed ? ` • Vitesse: ${speed}` : '';
+              const fpsTag = fps > 0 ? ` (${Math.round(fps)} fps)` : '';
+              setExportStatus(`Encodage Turbo : ${formatTime(out_time_sec)} / ${formatTime(total_duration_sec)}${speedTag}${fpsTag} • ${Math.round(percent)}%`);
+            });
+          } catch (listenErr) {
+            console.warn("Progress listener setup warning:", listenErr);
+          }
+
+          setExportStatus('Démarrage de l\'encodage Turbo FFmpeg (Transitions & Encodage H.264)...');
+          setExportProgress(15);
+
+          let mp4Data: ArrayBuffer | Uint8Array;
+          try {
+            mp4Data = await invoke<ArrayBuffer | Uint8Array>('render_project_turbo_ffmpeg', {
+              payload: {
+                clips: turboClips,
+                bg_music_path: bgMusicPath,
+                bg_music_volume: project.backgroundMusic?.volume ?? 0.15
+              }
+            });
+          } finally {
+            if (unlistenProgress) {
+              unlistenProgress();
+            }
+          }
+
+          if (abortExportRef.current) return;
+
+          setExportProgress(98);
+          setExportStatus('Finalisation du montage MP4...');
+
+          let finalBlob: Blob;
+          if (mp4Data instanceof ArrayBuffer) {
+            finalBlob = new Blob([mp4Data], { type: 'video/mp4' });
+          } else {
+            finalBlob = new Blob([mp4Data as any], { type: 'video/mp4' });
+          }
+
+          setExportedBlob(finalBlob);
+          setIsExporting(false);
+          setExportStatus('');
+          setExportProgress(100);
+          setSaveSuccessMsg('Montage exporté en Mode Turbo FFmpeg avec succès !');
+          setTimeout(() => setSaveSuccessMsg(null), 5000);
+
+          let thumbDataUrl = '';
+          if (imagesCacheRef.current.size > 0) {
+            const firstImg = imagesCacheRef.current.values().next().value;
+            if (firstImg) {
+              const c = document.createElement('canvas');
+              c.width = 320; c.height = 180;
+              const ctx = c.getContext('2d');
+              if (ctx) ctx.drawImage(firstImg, 0, 0, 320, 180);
+              thumbDataUrl = c.toDataURL('image/jpeg', 0.8);
+            }
+          }
+
+          await saveRecording({
+            id: crypto.randomUUID ? crypto.randomUUID() : `montage_${Date.now()}`,
+            title: `${projectName || 'Montage'}.mp4`,
+            blob: finalBlob,
+            thumbnail: thumbDataUrl,
+            duration: Math.round(totalDuration),
+            size: finalBlob.size,
+            date: new Date().toISOString()
+          });
+          loadLibraryAndProjects();
+          return;
+        }
+      } catch (turboErr: any) {
+        console.warn("Échec Mode Turbo FFmpeg, bascule automatique vers le Mode Studio Canvas:", turboErr);
+        if (exportEngine === 'turbo') {
+          setIsExporting(false);
+          setExportStatus('');
+          alert(`Erreur lors du rendu Turbo FFmpeg: ${turboErr?.message || turboErr}`);
+          return;
+        }
+        setExportStatus('Bascule vers le Mode Studio Canvas...');
       }
     }
 
@@ -5131,11 +5384,22 @@ export function VideoEditorStudio() {
     a.href = url;
     const isMp4 = exportedBlob.type.includes('mp4');
     const ext = isMp4 ? 'mp4' : 'webm';
-    a.download = `${projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'montage'}.${ext}`;
+    const fileName = `${projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'montage'}.${ext}`;
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+
+    setIsDownloaded(true);
+    setDownloadToast({ visible: true, fileName });
+    setSaveSuccessMsg(`Fichier "${fileName}" téléchargé avec succès !`);
+    setTimeout(() => {
+      setIsDownloaded(false);
+    }, 4000);
+    setTimeout(() => {
+      setDownloadToast(null);
+    }, 7000);
   };
 
   return (
@@ -6221,6 +6485,31 @@ export function VideoEditorStudio() {
                 </button>
 
                 <select
+                  value={exportEngine}
+                  onChange={(e) => setExportEngine(e.target.value as 'auto' | 'turbo' | 'studio')}
+                  style={{
+                    fontSize: '11px',
+                    padding: '3px 6px',
+                    borderRadius: '4px',
+                    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                    color: exportEngine === 'turbo' || (exportEngine === 'auto' && isEligibleForTurbo) ? '#38bdf8' : '#f59e0b',
+                    border: '1px solid var(--border-color)',
+                    cursor: 'pointer'
+                  }}
+                  title={
+                    exportEngine === 'auto'
+                      ? (isEligibleForTurbo ? "Mode Hybride : Moteur Turbo FFmpeg automatique (Ultra-Rapide)" : "Mode Hybride : Moteur Studio Canvas (Effets visuels détectés)")
+                      : (exportEngine === 'turbo' ? "Mode Turbo FFmpeg forcé (Rendu natif multi-thread)" : "Mode Studio Canvas complet")
+                  }
+                >
+                  <option value="auto">
+                    {isEligibleForTurbo ? "⚡ Hybride (Turbo Auto)" : "⚡ Hybride (Studio Auto)"}
+                  </option>
+                  <option value="turbo">🚀 Turbo FFmpeg (Rapide)</option>
+                  <option value="studio">🎨 Studio Canvas (Effets)</option>
+                </select>
+
+                <select
                   value={exportFormat}
                   onChange={(e) => setExportFormat(e.target.value as 'mp4' | 'webm')}
                   style={{
@@ -6242,10 +6531,32 @@ export function VideoEditorStudio() {
                   className="btn-primary"
                   onClick={handleExportProject}
                   disabled={isExporting || project.clips.length === 0}
-                  style={{ fontSize: '11px', padding: '3px 10px', display: 'flex', alignItems: 'center', gap: '5px' }}
+                  style={{
+                    fontSize: '11px',
+                    padding: '3px 10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    background: (exportEngine === 'turbo' || (exportEngine === 'auto' && isEligibleForTurbo))
+                      ? 'linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%)'
+                      : undefined
+                  }}
+                  title="Exporter le montage final"
                 >
-                  {isExporting ? <Sparkles size={12} className="spinning" /> : <Check size={12} />}
-                  <span>{isExporting ? `Exportation (${exportProgress}%)` : `Exporter (${exportFormat.toUpperCase()})`}</span>
+                  {isExporting ? <Sparkles size={12} className="spinning" /> : (
+                    (exportEngine === 'turbo' || (exportEngine === 'auto' && isEligibleForTurbo))
+                      ? <Zap size={12} />
+                      : <Check size={12} />
+                  )}
+                  <span>
+                    {isExporting
+                      ? `Exportation (${exportProgress}%)`
+                      : (exportEngine === 'turbo' || (exportEngine === 'auto' && isEligibleForTurbo)
+                          ? `Export Turbo (${exportFormat.toUpperCase()})`
+                          : `Exporter (${exportFormat.toUpperCase()})`
+                        )
+                    }
+                  </span>
                 </button>
 
                 {exportedBlob && (
@@ -6325,17 +6636,24 @@ export function VideoEditorStudio() {
                       onClick={handleDownloadExported} 
                       style={{ 
                         fontSize: '11px', 
-                        padding: '3px 10px', 
+                        padding: '3px 12px', 
                         display: 'flex', 
                         alignItems: 'center', 
-                        gap: '5px',
-                        backgroundColor: '#10b981',
-                        borderColor: '#10b981',
-                        boxShadow: '0 0 10px rgba(16, 185, 129, 0.35)'
+                        gap: '6px',
+                        backgroundColor: isDownloaded ? '#059669' : '#10b981',
+                        borderColor: isDownloaded ? '#34d399' : '#10b981',
+                        boxShadow: isDownloaded ? '0 0 16px rgba(16, 185, 129, 0.65)' : '0 0 10px rgba(16, 185, 129, 0.35)',
+                        transition: 'all 0.22s ease',
+                        transform: isDownloaded ? 'scale(1.02)' : 'none'
                       }}
+                      title="Enregistrer ce fichier vidéo sur votre ordinateur"
                     >
-                      <Download size={12} />
-                      <span>Télécharger ({exportedBlob.type.includes('mp4') ? 'MP4' : 'WebM'})</span>
+                      {isDownloaded ? <Check size={13} /> : <Download size={12} />}
+                      <span>
+                        {isDownloaded 
+                          ? `✓ Téléchargé (${exportedBlob.type.includes('mp4') ? 'MP4' : 'WebM'}) !` 
+                          : `Télécharger (${exportedBlob.type.includes('mp4') ? 'MP4' : 'WebM'})`}
+                      </span>
                     </button>
                   </>
                 )}
@@ -9393,6 +9711,69 @@ export function VideoEditorStudio() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+      {/* Floating Download Success Toast */}
+      {downloadToast && (
+        <div 
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            zIndex: 99999,
+            backgroundColor: 'rgba(15, 23, 42, 0.96)',
+            border: '1px solid #10b981',
+            borderRadius: '10px',
+            padding: '14px 18px',
+            boxShadow: '0 12px 35px rgba(0, 0, 0, 0.65), 0 0 25px rgba(16, 185, 129, 0.35)',
+            backdropFilter: 'blur(12px)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            maxWidth: '380px',
+            animation: 'fadeIn 0.25s ease'
+          }}
+        >
+          <div style={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '50%',
+            backgroundColor: 'rgba(16, 185, 129, 0.2)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#10b981',
+            flexShrink: 0
+          }}>
+            <Check size={20} strokeWidth={2.5} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#ffffff', marginBottom: '2px' }}>
+              Téléchargement réussi !
+            </div>
+            <div style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              Fichier : <strong style={{ color: '#34d399' }}>{downloadToast.fileName}</strong>
+            </div>
+            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
+              Enregistré dans votre dossier Téléchargements
+            </div>
+          </div>
+          <button 
+            onClick={() => setDownloadToast(null)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#94a3b8',
+              cursor: 'pointer',
+              padding: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+            title="Fermer"
+          >
+            <X size={15} />
+          </button>
         </div>
       )}
     </div>

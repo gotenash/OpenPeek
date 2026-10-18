@@ -1130,6 +1130,8 @@ export function drawImageClip(
   ctx.fillRect(0, 0, canvasW, canvasH);
 
   if (img && img.complete && img.naturalWidth > 0) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     const hRatio = canvasW / img.naturalWidth;
     const vRatio = canvasH / img.naturalHeight;
     const ratio = Math.min(hRatio, vRatio);
